@@ -1,7 +1,7 @@
 #include "ShaderModule.hpp"
 #include "Hash.hpp"
 
-#include <slang/slang.h>
+#include <slang.h>
 #include <portable-file-dialogs.h>
 
 #include <stdio.h>
@@ -91,7 +91,6 @@ inline const char* to_string(slang::ParameterCategory category) {
 		case slang::ParameterCategory::SubElementRegisterSpace: return "SubElementRegisterSpace";
 	};
 };
-
 
 struct ParameterAccessPath {
 	static const size_t kInvalidAccessPath = ~size_t(0);

@@ -64,6 +64,20 @@ target_link_directories(RoseLib PUBLIC $ENV{VULKAN_SDK}/Lib)
 target_link_libraries(RoseLib Vulkan::Vulkan)
 target_link_libraries(RoseLib glm glfw slang)
 
+if(WIN32)
+	target_link_libraries(RoseLib glfw $ENV{VULKAN_SDK}/Lib/slang.lib)
+else()
+	find_library(SLANG_LIB
+	  NAMES slang         # CMake will automatically prepend "lib" and append ".so"
+	  HINTS /usr/local/lib      # Optional, since /usr/lib is usually in the default search path
+	)
+	if(NOT SLANG_LIB)
+	  message(FATAL_ERROR "Could not find the slang library.")
+	else()
+	  message(STATUS "Found slang library: ${SLANG_LIB}")
+	endif()
+	target_link_libraries(RoseLib glfw ${SLANG_LIB})
+endif()
 target_include_directories(RoseLib PRIVATE thirdparty/glfw/include thirdparty/glfw/deps)
 
 if(UNIX)

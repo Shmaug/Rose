@@ -121,11 +121,11 @@ ref<Instance> Instance::Create(const vk::ArrayProxy<const std::string>& extensio
 	instance->mVulkanApiVersion = appInfo.apiVersion;
 
 	if (instance->mValidationLayers.contains("VK_LAYER_KHRONOS_validation")) {
-		instance->mDebugMessenger = vk::raii::DebugUtilsMessengerEXT(instance->mInstance, vk::DebugUtilsMessengerCreateInfoEXT{
-			.messageSeverity = vk::DebugUtilsMessageSeverityFlagBitsEXT::eError | vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning,
-			.messageType     = (vk::DebugUtilsMessageTypeFlagsEXT)vk::FlagTraits<vk::DebugUtilsMessageTypeFlagBitsEXT>::allFlags,
-			.pfnUserCallback = DebugCallback
-		});
+		// instance->mDebugMessenger = vk::raii::DebugUtilsMessengerEXT(instance->mInstance, vk::DebugUtilsMessengerCreateInfoEXT{
+		// 	.messageSeverity = vk::DebugUtilsMessageSeverityFlagBitsEXT::eError | vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning,
+		// 	.messageType     = (vk::DebugUtilsMessageTypeFlagsEXT)vk::FlagTraits<vk::DebugUtilsMessageTypeFlagBitsEXT>::allFlags,
+		// 	.pfnUserCallback = DebugCallback
+		// });
 	}
 
 	return instance;
