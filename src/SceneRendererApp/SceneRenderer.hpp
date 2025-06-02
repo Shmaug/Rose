@@ -14,7 +14,7 @@ class SceneRenderer {
 public:
 	using AttachmentInfo = std::tuple<std::string, vk::Format, vk::ClearValue>;
 	inline static const std::array<AttachmentInfo, 3> kRenderAttachments = {
-		AttachmentInfo{ "renderTarget", vk::Format::eR16G16B16A16Sfloat, vk::ClearValue{vk::ClearColorValue(0.f,0.f,0.f,1.f)} },
+		AttachmentInfo{ "renderTarget", vk::Format::eR32G32B32A32Sfloat, vk::ClearValue{vk::ClearColorValue(0.f,0.f,0.f,1.f)} },
 		AttachmentInfo{ "visibility",   vk::Format::eR32G32B32A32Uint,   vk::ClearValue{vk::ClearColorValue(~0u,~0u,~0u,~0u)} },
 		AttachmentInfo{ "depthBuffer",  vk::Format::eD32Sfloat,          vk::ClearValue{vk::ClearDepthStencilValue{1.f, 0}} },
 	};
@@ -47,14 +47,16 @@ private:
 			.maxLod = 12 } } } } });
 	uint32_t maxBounces = 10;
 	uint32_t maxDiffuseBounces = 3;
+	bool enableNEE = true;
+	bool useFixedSeed = false;
+	uint32_t fixedSeed = 1u;
 
 	PipelineCache accumulation = PipelineCache(FindShaderPath("Accumulation.cs.slang"));
+	bool enableAccumulation = true;
+	uint32_t maxAccumulation = 0;
 	ImageView prevRenderTarget;
 	Transform prevCameraToWorld;
 	std::chrono::high_resolution_clock::time_point prevSceneVersion;
-	bool enableAccumulation = true;
-	bool useFixedSeed = false;
-	uint32_t fixedSeed = 1u;
 
 	Tonemapper tonemapper;
 
@@ -150,20 +152,28 @@ public:
 	inline void SetScene(const ref<Scene>& s) { scene = s; }
 
 	inline void DrawGui(CommandContext& context) {
-		if (ImGui::CollapsingHeader("Path tracer")) {
-			Gui::ScalarField("Max bounces", vk::Format::eR32Uint, &maxBounces);
-			Gui::ScalarField("Max diffuse bounces", vk::Format::eR32Uint, &maxDiffuseBounces);
+		Gui::ScalarField("Max bounces", vk::Format::eR32Uint, &maxBounces);
+		Gui::ScalarField("Max diffuse bounces", vk::Format::eR32Uint, &maxDiffuseBounces);
+		ImGui::Checkbox("NEE", &enableNEE);
 
-			ImGui::Checkbox("Accumulation", &enableAccumulation);
-			ImGui::Checkbox("Fix seed", &useFixedSeed);
-			if (useFixedSeed) {
-				ImGui::SameLine();
-				Gui::ScalarField("", vk::Format::eR32Uint, &fixedSeed);
-			}
+		ImGui::Separator();
+
+		ImGui::Checkbox("Fix seed", &useFixedSeed);
+		if (useFixedSeed) {
+			ImGui::SameLine();
+			Gui::ScalarField("", vk::Format::eR32Uint, &fixedSeed);
 		}
-		if (ImGui::CollapsingHeader("Tonemapper")) {
-			tonemapper.DrawGui(context);
+
+		ImGui::Separator();
+
+		ImGui::Checkbox("Accumulation", &enableAccumulation);
+		if (enableAccumulation) {
+			Gui::ScalarField("Max accumulation", vk::Format::eR32Uint, &maxAccumulation);
 		}
+
+		ImGui::Separator();
+
+		tonemapper.DrawGui(context);
 	}
 
 	inline const ImageView& GetAttachment(const uint32_t index) const {
@@ -278,7 +288,7 @@ public:
 			params["seed"] = useFixedSeed ? fixedSeed : (uint32_t)context.GetDevice().NextTimelineSignal();
 			params["maxBounces"] = maxBounces;
 			params["maxDiffuseBounces"] = maxDiffuseBounces;
-			pathTracer(context, renderTarget.Extent(), params);
+			pathTracer(context, renderTarget.Extent(), params, ShaderDefines{ { "USE_NEE", enableNEE ? "1" : "0" } });
 		}
 
 		if (enableAccumulation && prevCameraToWorld.transform == viewData.cameraToWorld.transform && prevSceneVersion >= scene->renderData.updateTime)
@@ -286,6 +296,7 @@ public:
 			ShaderParameter params = {};
 			params["renderTarget"]     = ImageParameter{ .image = renderTarget,     .imageLayout = vk::ImageLayout::eGeneral };
 			params["prevRenderTarget"] = ImageParameter{ .image = prevRenderTarget, .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal };
+			params["maxAccumulation"] = maxAccumulation;
 			accumulation(context, renderTarget.Extent(), params);
 		}
 		context.Copy(renderTarget, prevRenderTarget);

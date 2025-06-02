@@ -2,23 +2,12 @@ import Rose.Core.MathUtils;
 import Rose.Scene.Scene;
 import SceneRendererApp.PathTracer.Microfacet;
 import SceneRendererApp.PathTracer.Sampling;
+import Lambertian;
 
 using namespace RoseEngine;
 
 inline float sqr(const float x) { return x * x; }
 inline float pow5(const float x) { return sqr(sqr(x)) * x; }
-
-struct BSDFEval {
-    float3 f;
-    float fwdPdf;
-    float revPdf;
-};
-struct BSDFSample {
-    float3 localDirOut;
-    uint   sampledLobe;
-    float  lobeRoughness;
-    float  lobeEta;
-};
 
 enum EvalFlags {
 	eNone        = 0,
@@ -27,7 +16,7 @@ enum EvalFlags {
 };
 static const EvalFlags kEvalFlags = EvalFlags::eNone;
 
-struct DisneyBSDF {
+struct PrincipledBSDF {
     float diffuse_weight;
     float sheen_weight;
 	float specular_weight;
@@ -257,7 +246,7 @@ struct DisneyBSDF {
                 float h_dot_out_sq = 1 - (1 - sqr(h_dot_in)) / sqr(eta);
                 if (h_dot_out_sq <= 0) {
                     r.sampledLobe = 0;
-                    r.localDirOut = 0;
+                    r.dirOut = 0;
                     return r;
                 }
                 // flip half_vector if needed
@@ -273,7 +262,7 @@ struct DisneyBSDF {
                 h_dot_out = dot(localDirOut, half_vector);
                 r.lobeEta = 0;
             }
-            r.localDirOut = localDirOut;
+            r.dirOut = localDirOut;
 			r.sampledLobe = (uint)LobeFlags::eGlass;
             r.lobeRoughness = sd.GetRoughness();
         } else if (rnd.z <= glass_prob + specular_prob + clearcoat_prob) {
@@ -292,7 +281,7 @@ struct DisneyBSDF {
             localDirOut = normalize(-localDirIn + 2 * h_dot_in * half_vector);
             h_dot_out = dot(half_vector, localDirOut);
 
-            r.localDirOut = localDirOut;
+            r.dirOut = localDirOut;
             r.lobeEta = 0;
             r.lobeRoughness = alpha_c;
             r.sampledLobe = (uint)LobeFlags::eClearcoat;
@@ -306,7 +295,7 @@ struct DisneyBSDF {
             h_dot_in  = dot(half_vector, localDirIn);
             h_dot_out = dot(half_vector, localDirOut);
 
-            r.localDirOut = localDirOut;
+            r.dirOut = localDirOut;
             r.lobeEta = 0;
             r.lobeRoughness = 1;
             r.sampledLobe = (uint)LobeFlags::eDiffuse;

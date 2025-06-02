@@ -37,6 +37,7 @@ private:
 	std::unordered_map<const Material<ImageView>*, size_t> materialMap;
 	std::unordered_map<ImageView, uint32_t> imageMap;
 
+	std::vector<uint32_t> emissiveInstances;
 	std::vector<MeshHeader> meshes;
 	std::unordered_map<const Mesh*, size_t> meshMap;
 	std::unordered_map<ref<Buffer>, uint32_t> meshBufferMap;
@@ -60,9 +61,11 @@ public:
 	SceneRenderData renderData = {};
 	ImageView backgroundImage = {};
 	float3    backgroundColor = float3(0);
+	float     backgroundSampleProbability = 0.5f;
 
 	inline void SetDirty() { dirty = true; }
 
+	void Load(CommandContext& context, const std::filesystem::path& p);
 	void LoadDialog(CommandContext& context);
 
 	inline void PreRender(CommandContext& context, auto getPipelineFn) {

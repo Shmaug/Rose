@@ -16,6 +16,7 @@ struct Scene {
 	StructuredBuffer<Transform>      inverseTransforms;
 	StructuredBuffer<MeshHeader>     meshes;
 	StructuredBuffer<Material>       materials;
+    StructuredBuffer<uint>           emissiveInstances;
 	RaytracingAccelerationStructure  accelerationStructure;
 	SamplerState                     sampler;
 	ByteAddressBuffer                meshBuffers[kMaxVertexBuffers];
@@ -27,6 +28,8 @@ struct Scene {
     uint   meshBufferCount;
     uint   materialCount;
     uint   imageCount;
+    uint   emissiveInstanceCount;
+    float  backgroundSampleProbability;
 
     float4 SampleImage(const uint imageIndex, const float2 uv, const float uvScreenSize = 0) {
         Texture2D tex = images[NonUniformResourceIndex(imageIndex)];
@@ -143,16 +146,12 @@ SceneVertex LoadSceneVertex(const Scene scene, const uint instanceIndex, const I
     v.instanceIndex = instanceIndex;
     v.primitiveIndex = primitiveIndex;
     v.position = v0 + dPds * bary.x + dPdt * bary.y;
-	v.faceNormal = cross(dPds, dPdt);
-    v.faceArea = length(v.faceNormal);
-    v.faceNormal /= v.faceArea;
-    v.faceArea /= 2;
+	v.faceNormal = normalize(cross(dPds, dPdt));
 
 	if (hasNormals) {
 		v.shadingNormal = n0 + (n1 - n0) * bary.x + (n2 - n0) * bary.y;
 		hasNormals = any(v.shadingNormal != 0) && all(v.shadingNormal == v.shadingNormal);
 	}
-
 	if (hasNormals) {
 		v.shadingNormal = normalize(v.shadingNormal);
 
@@ -183,12 +182,12 @@ SceneVertex LoadSceneVertex(const Scene scene, const uint instanceIndex, const I
 
     const Transform t = scene.transforms[instance.transformIndex];
     v.position = t.TransformPoint(v.position);
-    v.faceArea *= determinant(t.transform);
 
 	const Transform nt = transpose(scene.inverseTransforms[instance.transformIndex]);
 	v.faceNormal    = normalize(nt.TransformVector(v.faceNormal));
 	v.shadingNormal = normalize(nt.TransformVector(v.shadingNormal));
 	v.tangent.xyz   = normalize(nt.TransformVector(v.tangent.xyz));
+    v.faceArea      = length(cross(nt.TransformVector(dPds), nt.TransformVector(dPdt))) / 2;
 
 	return v;
 }

@@ -125,8 +125,8 @@ endif()
 # Builtin apps
 
 if (ROSE_BUILD_APPS)
-	add_executable(SceneApp src/SceneRendererApp/SceneRendererApp.cpp)
-	target_link_libraries(SceneApp PRIVATE RoseLib)
+	add_executable(SceneRendererApp src/SceneRendererApp/SceneRendererApp.cpp)
+	target_link_libraries(SceneRendererApp PRIVATE RoseLib)
 
 	add_executable(WorkGraphApp src/WorkGraphEditorApp.cpp)
 	target_link_libraries(WorkGraphApp PRIVATE RoseLib)

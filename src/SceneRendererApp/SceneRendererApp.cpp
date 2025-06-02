@@ -32,6 +32,9 @@ int main(int argc, const char** argv) {
 		}
 	});
 	app.AddWidget("Scene", [&]() {
+		if (ImGui::CollapsingHeader("Camera")) {
+			camera.DrawInspectorGui();
+		}
 		sceneEditor->InspectorWidget(app.CurrentContext());
 	}, true);
 
@@ -40,13 +43,16 @@ int main(int argc, const char** argv) {
 	}, true);
 
 	app.AddWidget("Viewport", [&]() {
+		CommandContext& context = app.CurrentContext();
+
+		for (const auto& f : app.window->GetDroppedFiles())
+			scene->Load(context, f);
+
 		camera.Update(app.dt);
 
 		const float2 extentf = std::bit_cast<float2>(ImGui::GetWindowContentRegionMax()) - std::bit_cast<float2>(ImGui::GetWindowContentRegionMin());
 		const uint2 extent = extentf;
 		if (extent.x == 0 || extent.y == 0) return;
-
-		CommandContext& context = app.CurrentContext();
 
 		const Transform cameraToWorld = camera.GetCameraToWorld();
 		const float aspect = extent.x / (float)extent.y;
