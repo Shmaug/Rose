@@ -9,6 +9,7 @@
 #include <ImGuizmo.h>
 #include <imnodes.h>
 #include <implot.h>
+#include <imgui/misc/fonts/DroidSans.cpp>
 
 namespace RoseEngine {
 
@@ -251,8 +252,8 @@ void Gui::Initialize(CommandContext& context, const Window& window, const Swapch
 
 	// Upload Fonts
 
-	ImGui::GetIO().Fonts->AddFontFromFileTTF("DroidSans.ttf", 16.f);
-	mHeaderFont = ImGui::GetIO().Fonts->AddFontFromFileTTF("DroidSans.ttf", 20.f);
+	ImGui::GetIO().Fonts->AddFontFromMemoryCompressedTTF(DroidSans_compressed_data, DroidSans_compressed_size, 18.f);
+	mHeaderFont = ImGui::GetIO().Fonts->AddFontFromMemoryCompressedTTF(DroidSans_compressed_data, DroidSans_compressed_size, 24.f);
 
 	context.Begin();
 	ImGui_ImplVulkan_CreateFontsTexture(**context);

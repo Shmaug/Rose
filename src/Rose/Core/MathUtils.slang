@@ -58,10 +58,24 @@ float3x3 inverse(float3x3 m, float det) {
     return r;
 }
 
-
 [Differentiable]
 float3x3 inverse(float3x3 m) {
     return inverse(m, determinant(m));
+}
+
+float3 OffsetRayOrigin(const float3 P, const float3 Ng) {
+    // https://research.nvidia.com/publication/2019-03_fast-and-robust-method-avoiding-self-intersection
+    float int_scale = 256.0;
+    int3 of_i = int3(int_scale * Ng);
+    float origin = 1.0 / 32.0;
+    float float_scale = 1.0 / 65536.0;
+    return float3(abs(P.x) < origin ? P.x + float_scale * Ng.x : asfloat(asint(P.x) + ((P.x < 0.0) ? -of_i.x : of_i.x)),
+                  abs(P.y) < origin ? P.y + float_scale * Ng.y : asfloat(asint(P.y) + ((P.y < 0.0) ? -of_i.y : of_i.y)),
+                  abs(P.z) < origin ? P.z + float_scale * Ng.z : asfloat(asint(P.z) + ((P.z < 0.0) ? -of_i.z : of_i.z)));
+}
+
+float3 OffsetRayOrigin(const float3 P, const float3 Ng, const float3 dir) {
+    return OffsetRayOrigin(P, dot(Ng, dir) < 0 ? -Ng : Ng);
 }
 
 #include "MathUtils.h"

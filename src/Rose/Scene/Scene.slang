@@ -90,86 +90,107 @@ struct Scene {
         v2 = buf.Load<T>(attrib.bufferOffset + attrib.stride * tri[2]);
     }
 
-    struct Vertex {
-        float3 position = 0;
-        float3 faceNormal = 0;
-
-        float3 shadingNormal = 0;
-        float4 tangent = 0;
-
-        float2 texcoord = 0;
-
-        property float3 bitangent { get { return tangent.w * cross(tangent.xyz, shadingNormal); } }
-    };
-    Vertex LoadVertex(const MeshHeader mesh, const uint primitiveIndex, const float2 bary) {
-        const uint3 tri = LoadTriangleIndices(mesh.triangles, primitiveIndex);
-
-        float3 v0, v1, v2;
-        float3 n0, n1, n2;
-        float2 t0, t1, t2;
-        bool hasNormals   = mesh.normals.bufferIndex < meshBufferCount;
-        bool hasTexcoords = mesh.texcoords.bufferIndex < meshBufferCount;
-
-        LoadTriangleAttribute(mesh.positions, tri, v0, v1, v2);
-        if (hasNormals)   LoadTriangleAttribute(mesh.normals, tri, n0, n1, n2);
-        if (hasTexcoords) LoadTriangleAttribute(mesh.texcoords, tri, t0, t1, t2);
-
-        const float3 dPds = v1 - v0;
-        const float3 dPdt = v2 - v0;
-
-        Vertex v = {};
-        v.position = v0 + dPds * bary.x + dPdt * bary.y;
-        v.faceNormal = normalize(cross(dPds, dPdt));
-
-        if (hasNormals) {
-            v.shadingNormal = n0 + (n1 - n0) * bary.x + (n2 - n0) * bary.y;
-			hasNormals = any(v.shadingNormal != 0) && all(v.shadingNormal == v.shadingNormal);
-        }
-
-        if (hasNormals) {
-			v.shadingNormal = normalize(v.shadingNormal);
-
-			// make face normal agree with shading normals
-			if (dot(v.faceNormal, v.shadingNormal) < 0)
-                v.faceNormal = -v.faceNormal;
-        } else
-            v.shadingNormal = v.faceNormal;
-
-        float3 bitangent;
-        if (hasTexcoords) {
-            const float2 dTds = t1 - t0;
-            const float2 dTdt = t2 - t0;
-            v.texcoord = t0 + dTds * bary.x + dTdt * bary.y;
-
-            // Slide 7: https://www.cs.utexas.edu/~fussell/courses/cs384g-spring2016/lectures/normal_mapping_tangent.pdf
-            float2x2 inv_m = inverse(transpose(float2x2(dTds, dTdt)));
-            float2x3 tb = mul(inv_m, float2x3(dPds, dPdt));
-            v.tangent.xyz = normalize(tb[0]);
-            bitangent = tb[1];
-        } else {
-            ONB(v.shadingNormal, v.tangent.xyz, bitangent);
-		}
-		v.tangent.w = 1;
-		v.tangent.w = dot(v.bitangent, bitangent) > 0 ? 1 : -1;
-
-        return v;
-	}
-
-    void TransformVertex(const InstanceHeader instance, inout Vertex vertex) {
-        vertex.position = transforms[instance.transformIndex].TransformPoint(vertex.position);
-        const Transform nt = transpose(inverseTransforms[instance.transformIndex]);
-        vertex.faceNormal    = normalize(nt.TransformVector(vertex.faceNormal));
-        vertex.shadingNormal = normalize(nt.TransformVector(vertex.shadingNormal));
-        vertex.tangent.xyz   = normalize(nt.TransformVector(vertex.tangent.xyz));
-	}
-
     float3 EvalBackground(const float3 dir) {
         float3 c = backgroundColor;
-        if (backgroundImage < kMaxImages) {
+        if (backgroundImage < imageCount) {
             c *= SampleImageUniform(backgroundImage, xyz2sphuv(dir)).rgb;
         }
         return c;
 	}
 };
+
+struct SceneVertex : IDifferentiable {
+	float3 position = 0;
+	uint   instanceIndex = UINT32_MAX;
+	float3 faceNormal = 0;
+	uint   primitiveIndex = UINT32_MAX;
+
+	float3 shadingNormal = 0;
+	float  faceArea = 0;
+	float4 tangent = 0;
+
+	float2 texcoord = 0;
+
+    // faceArea = -1 indicates background vertex
+    property bool isBackground { get { return faceArea < 0; } }
+
+	property float3 bitangent { get { return tangent.w * cross(tangent.xyz, shadingNormal); } }
+
+	// tangent space to world
+    float3 ToWorld(float3 v) { return v.x * tangent.xyz + v.y * bitangent + v.z * shadingNormal; }
+	// world to tangent space
+    float3 ToLocal(const float3 v) { return float3(dot(v, tangent.xyz), dot(v, bitangent), dot(v, shadingNormal)); }
+};
+
+[Differentiable]
+SceneVertex LoadSceneVertex(const Scene scene, const uint instanceIndex, const InstanceHeader instance, const MeshHeader mesh, const uint primitiveIndex, const float2 bary) {
+	const uint3 tri = scene.LoadTriangleIndices(mesh.triangles, primitiveIndex);
+
+	float3 v0, v1, v2;
+	float3 n0, n1, n2;
+	float2 t0, t1, t2;
+	bool hasNormals   = mesh.normals.bufferIndex < scene.meshBufferCount;
+	bool hasTexcoords = mesh.texcoords.bufferIndex < scene.meshBufferCount;
+
+	scene.LoadTriangleAttribute(mesh.positions, tri, v0, v1, v2);
+	if (hasNormals)   scene.LoadTriangleAttribute(mesh.normals,   tri, n0, n1, n2);
+	if (hasTexcoords) scene.LoadTriangleAttribute(mesh.texcoords, tri, t0, t1, t2);
+
+	const float3 dPds = v1 - v0;
+	const float3 dPdt = v2 - v0;
+
+    SceneVertex v = {};
+    v.instanceIndex = instanceIndex;
+    v.primitiveIndex = primitiveIndex;
+    v.position = v0 + dPds * bary.x + dPdt * bary.y;
+	v.faceNormal = cross(dPds, dPdt);
+    v.faceArea = length(v.faceNormal);
+    v.faceNormal /= v.faceArea;
+    v.faceArea /= 2;
+
+	if (hasNormals) {
+		v.shadingNormal = n0 + (n1 - n0) * bary.x + (n2 - n0) * bary.y;
+		hasNormals = any(v.shadingNormal != 0) && all(v.shadingNormal == v.shadingNormal);
+	}
+
+	if (hasNormals) {
+		v.shadingNormal = normalize(v.shadingNormal);
+
+		// make face normal agree with shading normals
+		if (dot(v.faceNormal, v.shadingNormal) < 0)
+			v.faceNormal = -v.faceNormal;
+	} else
+		v.shadingNormal = v.faceNormal;
+
+	float3 bitangent;
+	if (hasTexcoords) {
+		const float2 dTds = t1 - t0;
+		const float2 dTdt = t2 - t0;
+		v.texcoord = t0 + dTds * bary.x + dTdt * bary.y;
+
+		// Slide 7: https://www.cs.utexas.edu/~fussell/courses/cs384g-spring2016/lectures/normal_mapping_tangent.pdf
+		float2x2 inv_m = inverse(transpose(float2x2(dTds, dTdt)));
+		float2x3 tb = mul(inv_m, float2x3(dPds, dPdt));
+		v.tangent.xyz = normalize(tb[0]);
+		bitangent = tb[1];
+	} else {
+		ONB(v.shadingNormal, v.tangent.xyz, bitangent);
+	}
+	v.tangent.w = 1;
+	v.tangent.w = dot(v.bitangent, bitangent) > 0 ? 1 : -1;
+
+	// Apply transform
+
+    const Transform t = scene.transforms[instance.transformIndex];
+    v.position = t.TransformPoint(v.position);
+    v.faceArea *= determinant(t.transform);
+
+	const Transform nt = transpose(scene.inverseTransforms[instance.transformIndex]);
+	v.faceNormal    = normalize(nt.TransformVector(v.faceNormal));
+	v.shadingNormal = normalize(nt.TransformVector(v.shadingNormal));
+	v.tangent.xyz   = normalize(nt.TransformVector(v.tangent.xyz));
+
+	return v;
+}
 
 }

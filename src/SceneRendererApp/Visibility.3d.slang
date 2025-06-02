@@ -36,7 +36,6 @@ v2f vertexMain(
     uint instanceId: SV_InstanceID) {
     v2f o = {};
     o.pos = (projection * (worldToCamera * scene.transforms[scene.instances[instanceId].transformIndex])).ProjectPointUnnormalized(pos);
-    o.pos.y = -o.pos.y;
 	o.instanceId = instanceId;
 #if HAS_TEXCOORD
     o.uv = uv;

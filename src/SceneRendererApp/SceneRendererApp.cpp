@@ -1,7 +1,7 @@
 #include <Rose/Core/WindowedApp.hpp>
-#include <Rose/Render/ViewportCamera.hpp>
-#include <Rose/Render/SceneRenderer/SceneRenderer.hpp>
-#include <Rose/Render/SceneRenderer/SceneEditor.hpp>
+#include <Rose/Scene/ViewportCamera.hpp>
+#include "SceneRenderer.hpp"
+#include "SceneEditor/SceneEditor.hpp"
 
 #include <ImGuizmo.h>
 
@@ -31,7 +31,13 @@ int main(int argc, const char** argv) {
 			scene->LoadDialog(app.CurrentContext());
 		}
 	});
-	app.AddWidget("Renderers", [&]() { sceneEditor->InspectorWidget(app.CurrentContext()); }, true);
+	app.AddWidget("Scene", [&]() {
+		sceneEditor->InspectorWidget(app.CurrentContext());
+	}, true);
+
+	app.AddWidget("Renderer", [&]() {
+		sceneRenderer->DrawGui(app.CurrentContext());
+	}, true);
 
 	app.AddWidget("Viewport", [&]() {
 		camera.Update(app.dt);
@@ -43,10 +49,10 @@ int main(int argc, const char** argv) {
 		CommandContext& context = app.CurrentContext();
 
 		const Transform cameraToWorld = camera.GetCameraToWorld();
-		const Transform projection    = camera.GetProjection(extent.x / (float)extent.y);
+		const float aspect = extent.x / (float)extent.y;
 
-		sceneRenderer->PreRender(context, extent, cameraToWorld, projection);
-		sceneEditor->PreRender(context, inverse(cameraToWorld), projection);
+		sceneRenderer->PreRender(context, extent, cameraToWorld, camera.GetProjection(aspect));
+		sceneEditor->PreRender(context, inverse(cameraToWorld), camera.GetProjection(aspect, camera.nearZ*100000, false));
 
 
 		const ImageView& renderTarget = sceneRenderer->GetAttachment(0);

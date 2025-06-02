@@ -305,14 +305,18 @@ ref<SceneNode> LoadGLTF(CommandContext& context, const std::filesystem::path& fi
 			if (node.translation.size() == 3) transform = Transform::Translate((float3)*reinterpret_cast<const double3*>(node.translation.data()));
 			if (node.rotation.size() == 4)    transform.transform = transform.transform * glm::mat4_cast(glm::quat((float)node.rotation[3], (float)node.rotation[0], (float)node.rotation[1], (float)node.rotation[2]));
 			if (node.scale.size() == 1)       transform = transform * Transform::Scale(float3((float)node.scale[0]));
-		} else if (node.matrix.size() == 16)
+			dst->transform = transform;
+		} else if (node.matrix.size() == 16) {
 			transform.transform = (float4x4)*reinterpret_cast<const double4x4*>(node.matrix.data());
+			dst->transform = transform;
+		}
 
 		// parse primitives
 
 		if (node.mesh < model.meshes.size()) {
-			for (uint32_t i = 0; i < model.meshes[node.mesh].primitives.size(); i++) {
-				const auto& prim = model.meshes[node.mesh].primitives[i];
+			const auto& prims = model.meshes[node.mesh].primitives;
+			for (uint32_t i = 0; i < prims.size(); i++) {
+				const auto& prim = prims[i];
 				auto primNode = SceneNode::Create(model.meshes[node.mesh].name);
 				primNode->mesh = meshes[node.mesh][i];
 				primNode->material = materials[prim.material];
@@ -324,16 +328,22 @@ ref<SceneNode> LoadGLTF(CommandContext& context, const std::filesystem::path& fi
 		if (light_it != node.extensions.end() && light_it->second.Has("light")) {
 			const tinygltf::Light& l = model.lights[light_it->second.Get("light").GetNumberAsInt()];
 			if (l.type == "point") {
-				const float r = l.extras.Has("radius") ? (float)l.extras.Get("radius").GetNumberAsDouble() : 1e-4;
+				auto lightNode = SceneNode::Create("PointLight");
+				lightNode->SetParent(dst);
+				lightNode->mesh = sphereMesh;
+
+				double3 c = double3(l.color[0], l.color[1], l.color[2]) * l.intensity;
+				double r = 1e-4;
+				if (l.extras.Has("radius")) {
+					r = l.extras.Get("radius").GetNumberAsDouble();
+					c /= 4*M_PI*r*r;
+				}
+				lightNode->transform = Transform::Scale(float3((float)r));
 
 				Material<ImageView> m = {};
-				m.SetBaseColor( float3(0) );
-				m.SetEmission( (float3)(double3(l.color[0], l.color[1], l.color[2]) * (l.intensity / (4*M_PI*r*r))) );
-
-				auto lightNode = SceneNode::Create("PointLight");
-				lightNode->mesh = sphereMesh;
+				m.SetBaseColor(float3(0));
+				m.SetEmission((float3)c);
 				lightNode->material = make_ref<Material<ImageView>>(m);
-				lightNode->SetParent(dst);
 			}
 		}
 	}

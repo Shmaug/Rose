@@ -8,6 +8,7 @@
 #include "MathTypes.hpp"
 
 #define SLANG_MUTATING
+#define SLANG_DIFFERENTIABLE
 #define SLANG_GENERIC(T, Name)
 #define CPP_CONST const
 #define CPP_TEMPLATE(T, Name) template<T Name>
@@ -20,6 +21,7 @@
 #ifdef __SLANG_COMPILER__
 
 #define SLANG_MUTATING [mutating]
+#define SLANG_DIFFERENTIABLE [Differentiable]
 #define SLANG_GENERIC(T, Name) <let Name : T>
 #define CPP_CONST
 #define CPP_TEMPLATE

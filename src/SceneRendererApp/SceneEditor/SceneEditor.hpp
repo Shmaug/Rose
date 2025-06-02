@@ -6,12 +6,12 @@
 
 namespace RoseEngine {
 
-ref<SceneNode> LoadGLTF(CommandContext& context, const std::filesystem::path& filename);
-
 class SceneEditor {
 private:
 	ref<Scene> scene = nullptr;
 	weak_ref<SceneNode> selected = {};
+
+	float magnifierZoom = 5.f;
 
 	ref<Pipeline> outlinePipeline = {};
 
@@ -44,6 +44,7 @@ private:
 				if (n->GetParent()) {
 					n->GetParent()->RemoveChild(n);
 					deleted = true;
+					scene->SetDirty();
 				}
 			}
 			ImGui::EndPopup();
@@ -193,12 +194,13 @@ public:
 			}
 		}
 
+		float4 rect;
+		ImGuizmo::GetRect(&rect.x);
+		float2 cursorScreen = std::bit_cast<float2>(ImGui::GetIO().MousePos);
+		int2 cursor = int2(cursorScreen - float2(rect));
+
 		if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && ImGui::IsWindowFocused() && ImGui::IsWindowHovered() && !ImGuizmo::IsUsing()) {
 			// copy selected pixel from visibility buffer into host-visible buffer
-			float4 rect;
-			ImGuizmo::GetRect(&rect.x);
-			float2 cursorScreen = std::bit_cast<float2>(ImGui::GetIO().MousePos);
-			int2 cursor = int2(cursorScreen - float2(rect));
 			if (cursor.x >= 0 && cursor.y >= 0 && cursor.x < int(rect.z) && cursor.y < int(rect.w)) {
 				context.AddBarrier(vbuffer, Image::ResourceState{
 					.layout = vk::ImageLayout::eTransferSrcOptimal,
@@ -224,6 +226,48 @@ public:
 
 				viewportPickerQueue.push({ buf, context.GetDevice().NextTimelineSignal(), instanceNodes });
 			}
+		}
+
+		if (ImGui::IsKeyDown(ImGuiKey_Z)) {
+			if (ImGui::GetIO().MouseWheel != 0) {
+				magnifierZoom *= (1 + ImGui::GetIO().MouseWheel / 8);
+				magnifierZoom = max(magnifierZoom, 1.f);
+			}
+			const int32_t dstRadius = 100;
+			const int32_t srcRadius = max(dstRadius/magnifierZoom, 1.f);
+
+			// const float2 imageSize = float2(renderTarget.Extent());
+			// const float2 bb0 = cursorScreen - dstRadius;
+			// const float2 bb1 = cursorScreen + dstRadius;
+			// const float2 uv0 = (float2(cursor) - srcRadius) / imageSize;
+			// const float2 uv1 = (float2(cursor) + srcRadius) / imageSize;
+			// ImGui::GetWindowDrawList()->AddImage(
+			// 	Gui::GetTextureID(renderTarget, vk::Filter::eNearest),
+			// 	std::bit_cast<ImVec2>(bb0),
+			// 	std::bit_cast<ImVec2>(bb1),
+			// 	std::bit_cast<ImVec2>(uv0),
+			// 	std::bit_cast<ImVec2>(uv1),
+			// 	ImGui::GetColorU32(ImVec4(1, 1, 1, 1)));
+
+			const int2 imageSize = int2(renderTarget.Extent());
+			const int2 srcMin = max(int2(0),   int2(cursor - srcRadius));
+			const int2 srcMax = min(imageSize, int2(cursor + srcRadius));
+			const int2 dstMin = max(int2(0),   int2(cursor - dstRadius));
+			const int2 dstMax = min(imageSize, int2(cursor + dstRadius));
+			context.Blit(
+				renderTarget.GetImage(),
+				renderTarget.GetImage(),
+				{ vk::ImageBlit{
+					.srcSubresource = renderTarget.GetSubresourceLayer(),
+					.srcOffsets = std::array<vk::Offset3D, 2>{
+						vk::Offset3D{ srcMin.x, srcMin.y, 0 },
+						vk::Offset3D{ srcMax.x, srcMax.y, 0 } },
+					.dstSubresource = renderTarget.GetSubresourceLayer(),
+					.dstOffsets = std::array<vk::Offset3D, 2>{
+						vk::Offset3D{ dstMin.x, dstMin.y, 0 },
+						vk::Offset3D{ dstMax.x, dstMax.y, 0 } }
+				} },
+				vk::Filter::eNearest);
 		}
 	}
 };

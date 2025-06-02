@@ -6,29 +6,7 @@
 #define LEB_IMPLEMENTATION
 #include "leb.h"
 
-#include <imgui/imgui.h>
-#include <ImGuizmo.h>
-
 namespace RoseEngine {
-
-float Wedge(const float *a, const float *b) {
-	return a[0] * b[1] - a[1] * b[0];
-}
-bool IsInside(const float2 target, const float faceVertices[][3]) {
-	float v1[2] = {faceVertices[0][0], faceVertices[1][0]};
-	float v2[2] = {faceVertices[0][1], faceVertices[1][1]};
-	float v3[2] = {faceVertices[0][2], faceVertices[1][2]};
-	float x1[2] = {v2[0] - v1[0], v2[1] - v1[1]};
-	float x2[2] = {v3[0] - v2[0], v3[1] - v2[1]};
-	float x3[2] = {v1[0] - v3[0], v1[1] - v3[1]};
-	float y1[2] = {target[0] - v1[0], target[1] - v1[1]};
-	float y2[2] = {target[0] - v2[0], target[1] - v2[1]};
-	float y3[2] = {target[0] - v3[0], target[1] - v3[1]};
-	float w1 = Wedge(x1, y1);
-	float w2 = Wedge(x2, y2);
-	float w3 = Wedge(x3, y3);
-	return (w1 >= 0.0f) && (w2 >= 0.0f) && (w3 >= 0.0f);
-}
 
 ref<ConcurrentBinaryTree> ConcurrentBinaryTree::Create(CommandContext& context, uint32_t depth, uint32_t arraySize, bool square) {
 	auto cbt = make_ref<ConcurrentBinaryTree>();

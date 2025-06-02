@@ -2,18 +2,15 @@ cmake_minimum_required(VERSION 3.23)
 
 project(RoseEngine)
 
-# compiler options
-set(CMAKE_CXX_STANDARD 23)
-set(CXX_STANDARD_REQUIRED TRUE)
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
-
 set(ROSE_ENABLE_TESTING ON CACHE BOOL "Build tests")
 set(ROSE_BUILD_APPS     ON CACHE BOOL "Build default applications")
 set(SLANG_BUILD_DIR     "" CACHE PATH "Optional path to Slang build directory containing bin/ include/ and lib/. If empty, the Vulkan SDK Slang will be used instead.")
 
-# Find dependencies
+# Compiler options
 
-find_package(Vulkan REQUIRED)
+set(CMAKE_CXX_STANDARD 23)
+set(CXX_STANDARD_REQUIRED TRUE)
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 
 add_compile_definitions(
 	_USE_MATH_DEFINES
@@ -21,6 +18,10 @@ add_compile_definitions(
 	IMGUI_DEFINE_MATH_OPERATORS
 	VULKAN_HPP_NO_STRUCT_CONSTRUCTORS
 )
+
+# Dependencies
+
+find_package(Vulkan REQUIRED)
 
 add_subdirectory(thirdparty/glfw)
 add_subdirectory(thirdparty/glm)
@@ -66,13 +67,15 @@ target_include_directories(RoseLib
 target_link_libraries(RoseLib Vulkan::Vulkan glm glfw slang)
 target_include_directories(RoseLib PRIVATE thirdparty/glfw/include thirdparty/glfw/deps)
 
-# Link slang
+# Slang
 
 if(EXISTS ${SLANG_BUILD_DIR})
 	target_include_directories(RoseLib PUBLIC ${SLANG_BUILD_DIR}/include)
 	target_link_directories(RoseLib PUBLIC ${SLANG_BUILD_DIR}/lib)
-	configure_file("${SLANG_BUILD_DIR}/bin/slang.dll" "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/slang.dll" COPYONLY)
-	configure_file("${SLANG_BUILD_DIR}/bin/slang.pdb" "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/slang.pdb" COPYONLY)
+	if(WIN32)
+		configure_file("${SLANG_BUILD_DIR}/bin/slang.dll" "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/slang.dll" COPYONLY)
+		configure_file("${SLANG_BUILD_DIR}/bin/slang.pdb" "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/slang.pdb" COPYONLY)
+	endif()
 else()
 	target_include_directories(RoseLib PUBLIC $ENV{VULKAN_SDK}/include/slang)
 	target_link_directories(RoseLib PUBLIC $ENV{VULKAN_SDK}/Lib)
@@ -119,24 +122,23 @@ if (OpenVDB_FOUND)
     message(STATUS "OpenVDB enabled")
 endif()
 
-# Test and app targets
+# Builtin apps
 
 if (ROSE_BUILD_APPS)
-	add_executable(SceneApp src/SceneApp.cpp)
+	add_executable(SceneApp src/SceneRendererApp/SceneRendererApp.cpp)
 	target_link_libraries(SceneApp PRIVATE RoseLib)
 
-	add_executable(WorkGraphApp src/WorkGraphApp.cpp)
+	add_executable(WorkGraphApp src/WorkGraphEditorApp.cpp)
 	target_link_libraries(WorkGraphApp PRIVATE RoseLib)
 endif()
+
+# Tests
 
 if (ROSE_ENABLE_TESTING)
 	enable_testing()
 	add_subdirectory(tests)
 endif()
 
-# misc
-
-configure_file("${CMAKE_CURRENT_LIST_DIR}/thirdparty/imgui/misc/fonts/DroidSans.ttf" "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/DroidSans.ttf" COPYONLY)
-
+# Export header files
 
 install(TARGETS RoseLib FILE_SET HEADERS)

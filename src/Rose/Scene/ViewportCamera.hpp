@@ -24,9 +24,16 @@ struct ViewportCamera {
 	}
 
 	// aspect = width / height
-	inline Transform GetProjection(float aspect) const {
+	inline Transform GetProjection(float aspect, bool vflip = true) const {
 		Transform p = Transform::Perspective(glm::radians(fovY), aspect, nearZ);
-		p.transform[1] = -p.transform[1];
+		if (vflip) p.transform[1] = -p.transform[1];
+		return p;
+	}
+
+	// aspect = width / height
+	inline Transform GetProjection(float aspect, float farZ, bool vflip = true) const {
+		Transform p = Transform::Perspective(glm::radians(fovY), aspect, nearZ, farZ);
+		if (vflip) p.transform[1] = -p.transform[1];
 		return p;
 	}
 
@@ -40,10 +47,16 @@ struct ViewportCamera {
 	}
 
 	inline void Update(double dt) {
+		float3 move = float3(0.f);
+
 		if (ImGui::IsWindowHovered()) {
 			if (ImGui::IsMouseDown(ImGuiMouseButton_Right)) {
 				angles += -float2(ImGui::GetIO().MouseDelta.y, ImGui::GetIO().MouseDelta.x) * float(M_PI) / 1920.f;
 				angles.x = clamp(angles.x, -float(M_PI/2), float(M_PI/2));
+			}
+
+			if (ImGui::IsMouseDown(ImGuiMouseButton_Middle)) {
+				move += float3(-ImGui::GetIO().MouseDelta.x, ImGui::GetIO().MouseDelta.y, 0) / 10.f;
 			}
 		}
 
@@ -53,22 +66,21 @@ struct ViewportCamera {
 				moveSpeed = std::max(moveSpeed, .05f);
 			}
 
-			float3 move = float3(0,0,0);
-			if (ImGui::IsKeyDown(ImGuiKey::ImGuiKey_W)) move += float3( 0, 0,-1);
-			if (ImGui::IsKeyDown(ImGuiKey::ImGuiKey_S)) move += float3( 0, 0, 1);
-			if (ImGui::IsKeyDown(ImGuiKey::ImGuiKey_D)) move += float3( 1, 0, 0);
-			if (ImGui::IsKeyDown(ImGuiKey::ImGuiKey_A)) move += float3(-1, 0, 0);
-			if (ImGui::IsKeyDown(ImGuiKey::ImGuiKey_Q)) move += float3( 0,-1, 0);
-			if (ImGui::IsKeyDown(ImGuiKey::ImGuiKey_E)) move += float3( 0, 1, 0);
-			if (move != float3(0,0,0)) {
-				move = GetRotation() * normalize(move);
-				if (ImGui::IsKeyDown(ImGuiKey_LeftShift))
-					move *= 3.f;
-				position += move * moveSpeed * float(dt);
-			}
+			float3 m = float3(0,0,0);
+			if (ImGui::IsKeyDown(ImGuiKey::ImGuiKey_W)) m += float3( 0, 0,-1);
+			if (ImGui::IsKeyDown(ImGuiKey::ImGuiKey_S)) m += float3( 0, 0, 1);
+			if (ImGui::IsKeyDown(ImGuiKey::ImGuiKey_D)) m += float3( 1, 0, 0);
+			if (ImGui::IsKeyDown(ImGuiKey::ImGuiKey_A)) m += float3(-1, 0, 0);
+			if (ImGui::IsKeyDown(ImGuiKey::ImGuiKey_Q)) m += float3( 0,-1, 0);
+			if (ImGui::IsKeyDown(ImGuiKey::ImGuiKey_E)) m += float3( 0, 1, 0);
+			if (m != float3(0,0,0)) move += normalize(m);
+		}
+		if (move != float3(0,0,0)) {
+			if (ImGui::IsKeyDown(ImGuiKey_LeftShift))
+				move *= 3.f;
+			position += GetRotation() * move * moveSpeed * float(dt);
 		}
 	}
-
 };
 
 }

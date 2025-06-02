@@ -4,15 +4,19 @@
 
 namespace RoseEngine {
 
+SLANG_DIFFERENTIABLE
 inline float luminance(const float3 color) { return dot(color, float3(0.2126, 0.7152, 0.0722)); }
+SLANG_DIFFERENTIABLE
 inline float atan2_stable(const float y, const float x) { return x == 0.0 ? (y == 0 ? 0 : (y < 0 ? -M_PI / 2 : M_PI / 2)) : atan2(y, x); }
 
 // cartesian to spherical UV [0-1]
+SLANG_DIFFERENTIABLE
 inline float2 xyz2sphuv(const float3 v) {
 	const float theta = atan2_stable(v.z, v.x);
 	return float2(theta*M_1_PI*.5 + .5, acos(clamp(v.y, -1.f, 1.f))*M_1_PI);
 }
 // spherical UV [0-1] to cartesian
+SLANG_DIFFERENTIABLE
 inline float3 sphuv2xyz(float2 uv) {
 	uv.x = uv.x*2 - 1;
 	uv *= M_PI;
@@ -21,12 +25,14 @@ inline float3 sphuv2xyz(float2 uv) {
 }
 
 // Octahedral mapping
+SLANG_DIFFERENTIABLE
 float2 xyz2oct(const float3 v) {
 	const float3 n = v / (abs(v.x) + abs(v.y) + abs(v.z));
 	float2 xy = float2(n.x, n.y);
     xy = n.z >= 0.f ? xy : (1.f - abs(float2(n.y, n.x))) * float2(xy.x >= 0.f ? 1.f : -1.f, xy.y >= 0.f ? 1.f : -1.f);
     return xy * 0.5f + float2(0.5f);
 }
+SLANG_DIFFERENTIABLE
 float3 oct2xyz(const float2 p) {
     float2 f = p * 2.f - float2(1.f);
     // https://twitter.com/Stubbesaurus/status/937994790553227264
@@ -63,6 +69,7 @@ inline float3 viridis(const float x) {
 }
 
 // https://graphics.pixar.com/library/OrthonormalB/paper.pdf
+SLANG_DIFFERENTIABLE
 inline void ONB(const float3 n, OUT_ARG(float3, b1), OUT_ARG(float3, b2)) {
     float sign = n.z < 0 ? -1 : 1;
     const float a = -1.0f / (sign + n.z);

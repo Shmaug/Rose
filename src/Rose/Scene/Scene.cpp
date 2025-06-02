@@ -153,6 +153,8 @@ void Scene::PrepareRenderData(CommandContext& context, const Scene::RenderableSe
 	if (useAccelerationStructure) renderData.sceneParameters["accelerationStructure"] = renderData.accelerationStructure;
 	for (const auto& [buf, idx] : meshBufferMap) renderData.sceneParameters["meshBuffers"][idx] = BufferView{buf, 0, buf->Size()};
 	for (const auto& [img, idx] : imageMap)      renderData.sceneParameters["images"][idx] = ImageParameter{ .image = img, .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal };
+
+	renderData.updateTime = std::chrono::high_resolution_clock::now();
 }
 
 }

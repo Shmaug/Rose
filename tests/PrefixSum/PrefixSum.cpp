@@ -1,5 +1,5 @@
 #include <Rose/Core/Instance.hpp>
-#include <Rose/PrefixSum/PrefixSum.hpp>
+#include <Rose/Algorithm/PrefixSum/PrefixSum.hpp>
 
 #include <iostream>
 #include <vulkan/vulkan_hash.hpp>

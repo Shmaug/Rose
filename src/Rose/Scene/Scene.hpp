@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stack>
+#include <chrono>
 
 #include <Rose/Core/CommandContext.hpp>
 #include "SceneNode.hpp"
@@ -22,13 +23,15 @@ struct SceneRenderData {
 
 	std::vector<weak_ref<SceneNode>>    instanceNodes = {};
 	ShaderParameter                     sceneParameters = {};
+
+	std::chrono::high_resolution_clock::time_point updateTime;
 };
 
 class Scene {
 private:
 	std::vector<vk::AccelerationStructureInstanceKHR> instances;
-	std::vector<InstanceHeader>     instanceHeaders;
-	std::vector<Transform>          transforms;
+	std::vector<InstanceHeader>                       instanceHeaders;
+	std::vector<Transform>                            transforms;
 
 	std::vector<Material<uint32_t>> materials;
 	std::unordered_map<const Material<ImageView>*, size_t> materialMap;
@@ -40,6 +43,7 @@ private:
 
 	bool dirty = false;
 
+	// Batch render calls by: pipeline/mesh/material
 	using RenderableSet =
 		std::unordered_map<const Pipeline*,
 			std::pair<

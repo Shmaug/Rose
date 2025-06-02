@@ -2,7 +2,9 @@
 
 #include <stack>
 
+#include <Rose/Core/PipelineCache.hpp>
 #include <Rose/Scene/Scene.hpp>
+#include "Tonemapper/Tonemapper.hpp"
 
 namespace RoseEngine {
 
@@ -12,16 +14,15 @@ class SceneRenderer {
 public:
 	using AttachmentInfo = std::tuple<std::string, vk::Format, vk::ClearValue>;
 	inline static const std::array<AttachmentInfo, 3> kRenderAttachments = {
-		AttachmentInfo{ "renderTarget", vk::Format::eR8G8B8A8Unorm,    vk::ClearValue{vk::ClearColorValue(0.f,0.f,0.f,1.f)} },
-		AttachmentInfo{ "visibility",   vk::Format::eR32G32B32A32Uint, vk::ClearValue{vk::ClearColorValue(~0u,~0u,~0u,~0u)} },
-		AttachmentInfo{ "depthBuffer",  vk::Format::eD32Sfloat,        vk::ClearValue{vk::ClearDepthStencilValue{1.f, 0}} },
+		AttachmentInfo{ "renderTarget", vk::Format::eR16G16B16A16Sfloat, vk::ClearValue{vk::ClearColorValue(0.f,0.f,0.f,1.f)} },
+		AttachmentInfo{ "visibility",   vk::Format::eR32G32B32A32Uint,   vk::ClearValue{vk::ClearColorValue(~0u,~0u,~0u,~0u)} },
+		AttachmentInfo{ "depthBuffer",  vk::Format::eD32Sfloat,          vk::ClearValue{vk::ClearDepthStencilValue{1.f, 0}} },
 	};
 
 private:
 	TupleMap<ref<Pipeline>, MeshLayout, MaterialFlags, bool> cachedPipelines = {};
 	ref<vk::raii::Sampler> cachedSampler = nullptr;
 	ref<const ShaderModule> vertexShader, vertexShaderTextured, fragmentShader, fragmentShaderTextured, fragmentShaderTexturedAlphaCutoff;
-	ref<Pipeline> pathTracer = nullptr;
 
 	std::vector<ImageView> attachments;
 	ref<DescriptorSets> descriptorSets = {};
@@ -32,8 +33,30 @@ private:
 	};
 	ViewportParams viewData;
 
-
 	ref<Scene> scene = nullptr;
+
+	PipelineCache pathTracer = PipelineCache(FindShaderPath("PathTracer/PathTracer.cs.slang"), "main", PipelineLayoutInfo{
+		.descriptorBindingFlags = {
+			{ "scene.meshBuffers", vk::DescriptorBindingFlagBits::ePartiallyBound },
+			{ "scene.images",      vk::DescriptorBindingFlagBits::ePartiallyBound } },
+		.immutableSamplers = { { "scene.sampler", { vk::SamplerCreateInfo{
+			.magFilter  = vk::Filter::eLinear,
+			.minFilter  = vk::Filter::eLinear,
+			.mipmapMode = vk::SamplerMipmapMode::eLinear,
+			.minLod = 0,
+			.maxLod = 12 } } } } });
+	uint32_t maxBounces = 10;
+	uint32_t maxDiffuseBounces = 3;
+
+	PipelineCache accumulation = PipelineCache(FindShaderPath("Accumulation.cs.slang"));
+	ImageView prevRenderTarget;
+	Transform prevCameraToWorld;
+	std::chrono::high_resolution_clock::time_point prevSceneVersion;
+	bool enableAccumulation = true;
+	bool useFixedSeed = false;
+	uint32_t fixedSeed = 1u;
+
+	Tonemapper tonemapper;
 
 	inline const auto& GetPipeline(Device& device, const Mesh& mesh, const Material<ImageView>& material) {
 		if (!vertexShader || (ImGui::IsKeyPressed(ImGuiKey_F5, false) && vertexShader->IsStale())) {
@@ -126,6 +149,23 @@ private:
 public:
 	inline void SetScene(const ref<Scene>& s) { scene = s; }
 
+	inline void DrawGui(CommandContext& context) {
+		if (ImGui::CollapsingHeader("Path tracer")) {
+			Gui::ScalarField("Max bounces", vk::Format::eR32Uint, &maxBounces);
+			Gui::ScalarField("Max diffuse bounces", vk::Format::eR32Uint, &maxDiffuseBounces);
+
+			ImGui::Checkbox("Accumulation", &enableAccumulation);
+			ImGui::Checkbox("Fix seed", &useFixedSeed);
+			if (useFixedSeed) {
+				ImGui::SameLine();
+				Gui::ScalarField("", vk::Format::eR32Uint, &fixedSeed);
+			}
+		}
+		if (ImGui::CollapsingHeader("Tonemapper")) {
+			tonemapper.DrawGui(context);
+		}
+	}
+
 	inline const ImageView& GetAttachment(const uint32_t index) const {
 		return attachments[index];
 	}
@@ -160,6 +200,13 @@ public:
 				}
 				attachments.emplace_back(attachment);
 			}
+
+			prevRenderTarget = ImageView::Create(
+				Image::Create(context.GetDevice(), ImageInfo{
+					.format = attachments[0].GetImage()->Info().format,
+					.extent = uint3(extent, 1),
+					.usage = vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage,
+					.queueFamilies = { context.QueueFamily() } }));
 		}
 
 		viewData.cameraToWorld = cameraToWorld;
@@ -213,31 +260,39 @@ public:
 	}
 
 	inline void PostRender(CommandContext& context) {
-		if (!scene || !scene->sceneRoot || scene->renderData.drawLists.empty()) return;
-		if (!pathTracer || (ImGui::IsKeyPressed(ImGuiKey_F5, false) && pathTracer->GetShader()->IsStale())) {
-			if (pathTracer) context.GetDevice().Wait();
-			pathTracer = Pipeline::CreateCompute(context.GetDevice(), ShaderModule::Create(context.GetDevice(), FindShaderPath("PathTracer.cs.slang")), {},
-				PipelineLayoutInfo{
-					.descriptorBindingFlags = {
-						{ "scene.meshBuffers", vk::DescriptorBindingFlagBits::ePartiallyBound },
-						{ "scene.images",      vk::DescriptorBindingFlagBits::ePartiallyBound } },
-					.immutableSamplers = { { "scene.sampler", { cachedSampler } } } });
-		}
+		if (!scene || !scene->sceneRoot) return;
 
 		const ImageView& renderTarget = attachments[0];
 		const ImageView& visibility   = attachments[1];
 
-		ShaderParameter params = {};
-		params["scene"] = scene->renderData.sceneParameters;
-		params["renderTarget"] = ImageParameter{ .image = renderTarget, .imageLayout = vk::ImageLayout::eGeneral };
-		params["visibility"]   = ImageParameter{ .image = visibility, .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal };
-		params["worldToCamera"] = viewData.worldToCamera;
-		params["cameraToWorld"] = viewData.cameraToWorld;
-		params["projection"]    = viewData.projection;
-		params["inverseProjection"] = inverse(viewData.projection);
-		params["imageSize"] = uint2(renderTarget.Extent());
-		params["seed"] = (uint32_t)context.GetDevice().NextTimelineSignal();
-		context.Dispatch(*pathTracer, renderTarget.Extent(), params);
+		{
+			ShaderParameter params = {};
+			params["scene"] = scene->renderData.sceneParameters;
+			params["renderTarget"] = ImageParameter{ .image = renderTarget, .imageLayout = vk::ImageLayout::eGeneral };
+			params["visibility"]   = ImageParameter{ .image = visibility, .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal };
+			params["worldToCamera"] = viewData.worldToCamera;
+			params["cameraToWorld"] = viewData.cameraToWorld;
+			params["projection"]    = viewData.projection;
+			params["inverseProjection"] = inverse(viewData.projection);
+			params["imageSize"] = uint2(renderTarget.Extent());
+			params["seed"] = useFixedSeed ? fixedSeed : (uint32_t)context.GetDevice().NextTimelineSignal();
+			params["maxBounces"] = maxBounces;
+			params["maxDiffuseBounces"] = maxDiffuseBounces;
+			pathTracer(context, renderTarget.Extent(), params);
+		}
+
+		if (enableAccumulation && prevCameraToWorld.transform == viewData.cameraToWorld.transform && prevSceneVersion >= scene->renderData.updateTime)
+		{
+			ShaderParameter params = {};
+			params["renderTarget"]     = ImageParameter{ .image = renderTarget,     .imageLayout = vk::ImageLayout::eGeneral };
+			params["prevRenderTarget"] = ImageParameter{ .image = prevRenderTarget, .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal };
+			accumulation(context, renderTarget.Extent(), params);
+		}
+		context.Copy(renderTarget, prevRenderTarget);
+		prevCameraToWorld = viewData.cameraToWorld;
+		prevSceneVersion = scene->renderData.updateTime;
+
+		tonemapper.Render(context, renderTarget);
 	}
 };
 
