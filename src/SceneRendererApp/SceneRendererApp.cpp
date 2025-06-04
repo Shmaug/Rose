@@ -27,7 +27,7 @@ int main(int argc, const char** argv) {
 	ViewportCamera camera = {};
 
 	app.AddMenuItem("File", [&]() {
-		if (ImGui::MenuItem("Open scene") || (ImGui::IsKeyDown(ImGuiKey_ModCtrl) && ImGui::IsKeyPressed(ImGuiKey_O), false)) {
+		if (ImGui::MenuItem("Open scene")) {
 			scene->LoadDialog(app.CurrentContext());
 		}
 	});
@@ -44,6 +44,9 @@ int main(int argc, const char** argv) {
 
 	app.AddWidget("Viewport", [&]() {
 		CommandContext& context = app.CurrentContext();
+
+		if (ImGui::IsKeyDown(ImGuiKey_ModCtrl) && ImGui::IsKeyPressed(ImGuiKey_O), false)
+			scene->LoadDialog(context);
 
 		for (const auto& f : app.window->GetDroppedFiles())
 			scene->Load(context, f);

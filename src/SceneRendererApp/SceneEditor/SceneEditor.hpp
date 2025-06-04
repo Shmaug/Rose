@@ -12,6 +12,7 @@ private:
 	weak_ref<SceneNode> selected = {};
 
 	float magnifierZoom = 5.f;
+	int2 magnifierCenter;
 
 	ref<Pipeline> outlinePipeline = {};
 
@@ -229,6 +230,10 @@ public:
 		}
 
 		if (ImGui::IsKeyDown(ImGuiKey_Z)) {
+			const int2 imageSize = int2(renderTarget.Extent());
+			if (all(glm::greaterThanEqual(cursor, int2(0))) && all(glm::lessThan(cursor, imageSize)))
+				magnifierCenter = cursor;
+
 			if (ImGui::GetIO().MouseWheel != 0) {
 				magnifierZoom *= (1 + ImGui::GetIO().MouseWheel / 8);
 				magnifierZoom = max(magnifierZoom, 1.f);
@@ -236,7 +241,6 @@ public:
 			const int32_t dstRadius = 100;
 			const int32_t srcRadius = max(dstRadius/magnifierZoom, 1.f);
 
-			// const float2 imageSize = float2(renderTarget.Extent());
 			// const float2 bb0 = cursorScreen - dstRadius;
 			// const float2 bb1 = cursorScreen + dstRadius;
 			// const float2 uv0 = (float2(cursor) - srcRadius) / imageSize;
@@ -249,25 +253,26 @@ public:
 			// 	std::bit_cast<ImVec2>(uv1),
 			// 	ImGui::GetColorU32(ImVec4(1, 1, 1, 1)));
 
-			const int2 imageSize = int2(renderTarget.Extent());
-			const int2 srcMin = max(int2(0),   int2(cursor - srcRadius));
-			const int2 srcMax = min(imageSize, int2(cursor + srcRadius));
-			const int2 dstMin = max(int2(0),   int2(cursor - dstRadius));
-			const int2 dstMax = min(imageSize, int2(cursor + dstRadius));
-			context.Blit(
-				renderTarget.GetImage(),
-				renderTarget.GetImage(),
-				{ vk::ImageBlit{
-					.srcSubresource = renderTarget.GetSubresourceLayer(),
-					.srcOffsets = std::array<vk::Offset3D, 2>{
-						vk::Offset3D{ srcMin.x, srcMin.y, 0 },
-						vk::Offset3D{ srcMax.x, srcMax.y, 0 } },
-					.dstSubresource = renderTarget.GetSubresourceLayer(),
-					.dstOffsets = std::array<vk::Offset3D, 2>{
-						vk::Offset3D{ dstMin.x, dstMin.y, 0 },
-						vk::Offset3D{ dstMax.x, dstMax.y, 0 } }
-				} },
-				vk::Filter::eNearest);
+			const int2 srcMin = max(int2(0),   magnifierCenter - srcRadius);
+			const int2 srcMax = min(imageSize, magnifierCenter + srcRadius);
+			const int2 dstMin = max(int2(0),   magnifierCenter - dstRadius);
+			const int2 dstMax = min(imageSize, magnifierCenter + dstRadius);
+			if (all(glm::greaterThan(srcMax, srcMin)) && all(glm::greaterThan(dstMax, dstMin))) {
+				context.Blit(
+					renderTarget.GetImage(),
+					renderTarget.GetImage(),
+					{ vk::ImageBlit{
+						.srcSubresource = renderTarget.GetSubresourceLayer(),
+						.srcOffsets = std::array<vk::Offset3D, 2>{
+							vk::Offset3D{ srcMin.x, srcMin.y, 0 },
+							vk::Offset3D{ srcMax.x, srcMax.y, 0 } },
+						.dstSubresource = renderTarget.GetSubresourceLayer(),
+						.dstOffsets = std::array<vk::Offset3D, 2>{
+							vk::Offset3D{ dstMin.x, dstMin.y, 0 },
+							vk::Offset3D{ dstMax.x, dstMax.y, 0 } }
+					} },
+					vk::Filter::eNearest);
+			}
 		}
 	}
 };

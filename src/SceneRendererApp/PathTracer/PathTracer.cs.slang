@@ -11,13 +11,18 @@ using namespace RoseEngine;
 #define USE_NEE 1
 #endif
 
+#ifndef DI_ONLY
+#define DI_ONLY 0
+#endif
+
 static const float kConnectabilityThreshold   = 0.5;
 static const float kDiffuseRoughnessThreshold = 0.25;
-static const bool  kNEE = USE_NEE;
+static const bool kNEE = (bool)USE_NEE;
+static const bool kDIOnly = (bool)USE_NEE && (bool)DI_ONLY;
 
 ParameterBlock<Scene> scene;
-RWTexture2D<float4> renderTarget;
-Texture2D<uint4>    visibility;
+RWTexture2D<float4>   renderTarget;
+Texture2D<uint4>      visibility;
 
 uniform Transform worldToCamera;
 uniform Transform cameraToWorld;
@@ -28,53 +33,11 @@ uniform uint      seed;
 uniform uint      maxBounces;
 uniform uint      maxDiffuseBounces;
 
-struct PackedHit {
-    uint   instanceIndex;
-    uint   primitiveIndex;
-    float2 barycentrics;
-}
-
-// applies normal map to vertex
-bool LoadMaterial(const InstanceHeader instance, inout SceneVertex vertex, out Material material, const float uvScreenSize = 0) {
-    material = scene.materials[instance.materialIndex];
-
-    if (material.baseColorImage < scene.imageCount) {
-        float4 rgba = scene.SampleImage(material.baseColorImage, vertex.texcoord, uvScreenSize);
-        if (rgba.a < material.GetAlphaCutoff() && material.HasFlag(MaterialFlags::eAlphaCutoff))
-            return false;
-        material.SetBaseColor(material.GetBaseColor() * rgba.rgb);
-    }
-
-    if (material.emissionImage < scene.imageCount)
-        material.SetEmission(material.GetEmission() * scene.SampleImage(material.emissionImage, vertex.texcoord, uvScreenSize).rgb);
-
-	if (material.bumpMap < scene.imageCount) {
-        float3 bump = scene.SampleImage(material.bumpMap, vertex.texcoord, uvScreenSize).rgb;
-        bump = float3(bump.x*2-1, bump.y*2-1, bump.z);
-        vertex.shadingNormal = normalize(
-            bump.x * vertex.tangent.xyz +
-            bump.y * vertex.bitangent +
-            bump.z * vertex.shadingNormal);
-        vertex.tangent.xyz = normalize(vertex.tangent.xyz - vertex.shadingNormal * dot(vertex.tangent.xyz, vertex.shadingNormal));
-    }
-    return true;
-}
-
-bool LoadHit(const PackedHit hit, out SceneVertex vertex, out Material material, const float uvScreenSize = 0) {
-    if (hit.instanceIndex >= scene.instanceCount) {
-        vertex = {};
-        material = {};
-        return false;
-    }
-
-    const InstanceHeader instance = scene.instances[hit.instanceIndex];
-
-    // Load vertex
-
-    const MeshHeader mesh = scene.meshes[instance.meshIndex];
-    vertex = LoadSceneVertex(scene, hit.instanceIndex, instance, mesh, hit.primitiveIndex, hit.barycentrics);
-
-    return LoadMaterial(instance, vertex, material, uvScreenSize);
+void GetPrimaryRay(const float2 pixel, out float3 origin, out float3 direction, const float depth = -1) {
+    const float3 clip = float3(2 * pixel / float2(imageSize) - 1, depth);
+    const float3 viewPos = inverseProjection.ProjectPoint(clip);
+    direction = normalize(transpose(worldToCamera).TransformVector(viewPos));
+    origin = cameraToWorld.TransformPoint(0);
 }
 
 struct PathState {
@@ -83,7 +46,9 @@ struct PathState {
     float3 radiance;
     float  misBsdfPdf;
     float3 rayOrigin;
+	float  pad0;
     float3 rayDirection;
+	float  pad1;
     RandomSampler rng;
 
     property uint vertexIndex {
@@ -96,12 +61,24 @@ struct PathState {
         set { BF_SET(packedVertexIndices, newValue, 16, 16); }
     }
 };
+static const uint PathStateSize = sizeof(PathState);
 
-bool SampleDirectLight(inout PathState path, const SceneVertex vertex, const Material material, const float3 localDirIn, inout LambertianBSDF bsdf, out float3 L) {
+// power hueristic (beta=2)
+float evalMIS(float pdf1, float pdf2) {
+    if (!(pdf1 > 0))
+        return 0;
+	// pdf1 / (pdf1 + pdf2)  =  1 / (1 + pdf2/pdf1)
+	const float r = pdf2 / pdf1;
+	return 1 / (1 + r*r);
+}
+
+bool SampleDirectLight(inout RandomSampler rng, const SceneVertex vertex, const Material material, const float3 localDirIn, const LambertianBSDF bsdf, out float3 L) {
     float pdf;
-    SceneVertex lightVertex = scene.SampleEmission(path.rng.NextFloat(), pdf);
-    if (!(pdf > 0))
+    SceneVertex lightVertex = scene.SampleEmission(rng.NextFloat(), pdf);
+    if (!(pdf > 0)) {
+        L = 0;
         return false;
+    }
 
     float G = 1;
     float3 dirOut;
@@ -117,8 +94,10 @@ bool SampleDirectLight(inout PathState path, const SceneVertex vertex, const Mat
         ray.TMax = FLT_MAX;
     } else {
         Material lightMaterial;
-        if (!LoadMaterial(scene.instances[lightVertex.instanceIndex], lightVertex, lightMaterial))
+        if (!scene.LoadMaterial<Scene::ImageSampleFlags::eNonUniform>(scene.instances[lightVertex.instanceIndex], lightVertex, lightMaterial)) {
+            L = 0;
 			return false;
+		}
 
         L = lightMaterial.GetEmission();
 
@@ -136,59 +115,54 @@ bool SampleDirectLight(inout PathState path, const SceneVertex vertex, const Mat
         ray.Direction = OffsetRayOrigin(lightVertex.position, lightVertex.faceNormal, -dirOut) - ray.Origin;
         ray.TMax = length(ray.Direction);
         ray.Direction /= ray.TMax;
-	}
-    if (!any(L > 0))
+    }
+    if (!any(L > 0)) {
+        L = 0;
         return false;
+    }
 
     L /= pdf;
 
     const BSDFEval f = bsdf.Eval(localDirIn, vertex.ToLocal(dirOut));
     L *= f.f * G;
 
+    // balance heuristic
+    if (!kDIOnly)
+    	L *= evalMIS(pdf, f.fwdPdf * G);
+
     if (!any(L > 0))
         return false;
 
-    // balance heuristic
-    L /= 1 + (f.fwdPdf * G) / pdf;
-
-    RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> rq;
-    rq.TraceRayInline(scene.accelerationStructure, 0, 1, ray);
-    rq.Proceed();
-    return rq.CommittedStatus() == COMMITTED_NOTHING;
-    return true;
+    return !scene.Occluded(ray);
 }
 
-void ShadeHit(inout PathState path, const PackedHit hit) {
+void ShadeHit(inout PathState path, const PackedSceneHit hit) {
     SceneVertex vertex;
     Material material;
-	if (!LoadHit(hit, vertex, material)) {
-        // ray missed
+    if (!scene.UnpackSceneHit<Scene::ImageSampleFlags::eNonUniform, false>(hit, vertex, material)) {
+        // evaluate background/environment emission
         const float3 Le = scene.EvalBackground(path.rayDirection);
         if (any(Le > 0)) {
-            vertex.position = path.rayDirection;
-            vertex.faceArea = -1;
-            const float w = kNEE && (path.misBsdfPdf > 0) ?
-                1 / (1 + scene.EmissionPdf(vertex) / path.misBsdfPdf)
-                : 1;
+            const float w = !kNEE || path.misBsdfPdf == 0 ? 1 : evalMIS(path.misBsdfPdf, scene.EvalBackgroundSamplePdf(path.rayDirection));
             path.radiance += path.throughput * Le * w;
         }
         path.throughput = 0;
         return;
     }
 
+	// evaluate surface emission
     const float cosIn = -dot(path.rayDirection, vertex.faceNormal);
     if (cosIn > 0) {
         const float3 Le = material.GetEmission();
         if (any(Le > 0)) {
-            const float3 dt = path.rayOrigin - vertex.position;
-            const float G = cosIn / dot(dt, dt);
-            const float w = kNEE && (path.misBsdfPdf > 0) ?
-                1 / (1 + scene.EmissionPdf(vertex) / (path.misBsdfPdf * G))
-                : 1;
-			path.radiance += path.throughput * Le * w;
+            const float3 d = path.rayOrigin - vertex.position;
+            const float G = cosIn / dot(d, d);
+            const float w = !kNEE || path.misBsdfPdf == 0 ? 1 : evalMIS(path.misBsdfPdf * G, scene.EvalSurfaceSamplePdf(vertex));
+            path.radiance += path.throughput * Le * w;
         }
     }
 
+	// path length limit
     if (path.vertexIndex >= maxBounces+1) {
         path.throughput = 0;
         return;
@@ -202,12 +176,17 @@ void ShadeHit(inout PathState path, const PackedHit hit) {
     const bool connectable = bsdf.Connectable();
     if (kNEE && connectable) {
         float3 L;
-        if (SampleDirectLight(path, vertex, material, localDirIn, bsdf, L)) {
+        if (SampleDirectLight(path.rng, vertex, material, localDirIn, bsdf, L)) {
             path.radiance += path.throughput * L;
         }
     }
 
     // bsdf sampling
+
+    if (kDIOnly) {
+        path.throughput = 0;
+        return;
+    }
 
     const BSDFSample s = bsdf.Sample(path.rng.NextFloat(), localDirIn);
     if (s.sampledLobe == kInvalidLobeIndex) {
@@ -216,6 +195,7 @@ void ShadeHit(inout PathState path, const PackedHit hit) {
         return;
     }
 
+	// diffuse bounce limit
     if (s.lobeRoughness > kDiffuseRoughnessThreshold) {
         path.diffuseBounces++;
         if (path.diffuseBounces > maxDiffuseBounces) {
@@ -227,28 +207,8 @@ void ShadeHit(inout PathState path, const PackedHit hit) {
     const BSDFEval f = bsdf.Eval(localDirIn, s.dirOut);
     path.throughput *= f.fwdPdf > 0 ? f.f / f.fwdPdf : 0;
     path.misBsdfPdf = connectable ? f.fwdPdf : 0;
-
 	path.rayDirection = vertex.ToWorld(s.dirOut);
 	path.rayOrigin = OffsetRayOrigin(vertex.position, vertex.faceNormal, path.rayDirection);
-}
-
-PackedHit TraceRay(const float3 origin, const float3 direction) {
-    RayDesc ray = {};
-    ray.Origin = origin;
-    ray.Direction = direction;
-    ray.TMin = 0;
-    ray.TMax = FLT_MAX;
-    RayQuery<RAY_FLAG_NONE> rq;
-    rq.TraceRayInline(scene.accelerationStructure, 0, 1, ray);
-    while (rq.Proceed()) {
-        // TODO: non opaque triangles
-        PackedHit candidateHit = PackedHit(rq.CandidateInstanceID(), rq.CandidatePrimitiveIndex(), rq.CandidateTriangleBarycentrics());
-    }
-    if (rq.CommittedStatus() == COMMITTED_NOTHING) {
-        return PackedHit(UINT32_MAX, UINT32_MAX, 0);
-    } else {
-        return PackedHit(rq.CommittedInstanceID(), rq.CommittedPrimitiveIndex(), rq.CommittedTriangleBarycentrics());
-    }
 }
 
 [shader("compute")]
@@ -258,22 +218,25 @@ void main(uint3 index: SV_DispatchThreadID) {
         return;
 
     PathState path;
-    const float2 clip = 2 * (index.xy + .5) / float2(imageSize) - 1;
-    path.rayDirection = normalize(cameraToWorld.TransformVector(inverseProjection.ProjectPoint(float3(clip.x, clip.y, -1))));
-    path.rayOrigin = cameraToWorld.TransformPoint(0);
+    GetPrimaryRay(index.xy + .5, path.rayOrigin, path.rayDirection);
     path.rng = RandomSampler(seed, index.xy);
     path.throughput = 1;
     path.radiance = 0;
     path.diffuseBounces = 0;
+    path.misBsdfPdf = 0;
 
-    // shade primary hit
-    path.vertexIndex = 1;
-    // ShadeHit(path, TraceRay(path.rayOrigin, path.rayDirection));
-    ShadeHit(path, reinterpret<PackedHit>(visibility[index.xy]));
+    // load primary hit from vbuffer
+    {
+		path.vertexIndex = 1;
+		// const PackedSceneHit hit = reinterpret<PackedSceneHit>(visibility[index.xy]);
+		const PackedSceneHit hit = scene.TraceRay(RayDesc(path.rayOrigin, 0, path.rayDirection, FLT_MAX));
+		ShadeHit(path, hit);
+    }
 
-    while (any(path.throughput > 0)) {
-        const PackedHit hit = TraceRay(path.rayOrigin, path.rayDirection);
+    // trace rays for secondary hits
+    while (!kDIOnly && any(path.throughput > 0)) {
         path.vertexIndex++;
+        const PackedSceneHit hit = scene.TraceRay(RayDesc(path.rayOrigin, 0, path.rayDirection, FLT_MAX));
         ShadeHit(path, hit);
     }
 

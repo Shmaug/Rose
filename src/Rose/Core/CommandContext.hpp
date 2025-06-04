@@ -322,6 +322,7 @@ public:
 			.extent = vk::Extent3D{dst.Extent().x, dst.Extent().y, dst.Extent().z} });
 	}
 
+	// Get a device buffer
 	template<typename T = std::byte>
 	inline BufferRange<T> GetTransientBuffer(const size_t count, const vk::BufferUsageFlags usage) {
 		const size_t size = sizeof(T) * count;
@@ -335,7 +336,7 @@ public:
 				auto it = std::ranges::lower_bound(q, size, {}, &CachedData::CachedBuffers::size);
 				if (it != q.end()) {
 					hostBuffer = it->hostBuffer;
-					buffer = it->buffer;
+					buffer     = it->buffer;
 					q.erase(it);
 				}
 			}
@@ -352,53 +353,15 @@ public:
 			hostBuffer = {};
 		}
 
-		return mCache.mNewBuffers[usage].emplace_back(hostBuffer, buffer).buffer;
+		mCache.mNewBuffers[usage].emplace_back(hostBuffer, buffer);
+
+		return buffer.slice(0, size);
 	}
 
-	ref<Image> GetTransientImage(const ImageInfo& info);
-	inline ref<Image> GetTransientImage(const uint3 extent, const vk::Format format, const vk::ImageUsageFlags usage, const uint32_t mipLevels = 1, const uint32_t arrayLayers = 1) {
-		return GetTransientImage(ImageInfo {
-			.format = format,
-			.extent = extent,
-			.mipLevels = mipLevels,
-			.arrayLayers = arrayLayers,
-			.usage = usage,
-			.queueFamilies = { QueueFamily() }
-		});
-	}
-
-	// Copies data to a host-visible buffer
+	// Copies data to buffer.
+	// If usage is specified, also creates a device buffer
 	template<std::ranges::contiguous_range R>
-	inline BufferView UploadData(R&& data) {
-		const size_t size = sizeof(std::ranges::range_value_t<R>) * data.size();
-
-		BufferView hostBuffer = {};
-		BufferView buffer = {};
-		if (auto it_ = mCache.mBuffers.find((vk::BufferUsageFlags)0); it_ != mCache.mBuffers.end()) {
-			auto& q = it_->second;
-			if (!q.empty() && q.back().size() >= size) {
-				// find smallest cached buffer that can fit size
-				auto it = std::ranges::lower_bound(q, size, {}, &CachedData::CachedBuffers::size);
-				if (it != q.end()) {
-					hostBuffer = it->hostBuffer;
-					buffer = it->buffer;
-					q.erase(it);
-				}
-			}
-		}
-
-		if (!hostBuffer || hostBuffer.size() < size) {
-			hostBuffer = Buffer::Create(*mDevice, data);
-			mDevice->SetDebugName(**hostBuffer.mBuffer, "Transient host buffer");
-		} else
-			std::memcpy(hostBuffer.data(), data.data(), size);
-
-		return mCache.mNewBuffers[(vk::BufferUsageFlags)0].emplace_back(hostBuffer, buffer).hostBuffer;
-	}
-
-	// Copies data to a device-local buffer
-	template<std::ranges::contiguous_range R>
-	inline BufferView UploadData(R&& data, vk::BufferUsageFlags usage) {
+	inline BufferView UploadData(R&& data, vk::BufferUsageFlags usage = (vk::BufferUsageFlags)0) {
 		const size_t size = sizeof(std::ranges::range_value_t<R>) * std::ranges::size(data);
 
 		usage |= vk::BufferUsageFlagBits::eTransferDst;
@@ -412,12 +375,13 @@ public:
 				auto it = std::ranges::lower_bound(q, size, {}, &CachedData::CachedBuffers::size);
 				if (it != q.end()) {
 					hostBuffer = it->hostBuffer;
-					buffer = it->buffer;
+					buffer     = it->buffer;
 					q.erase(it);
 				}
 			}
 		}
 
+		// copy data to host buffer, or create host buffer
 		if (hostBuffer && hostBuffer.size() >= size) {
 			std::memcpy(hostBuffer.data(), std::ranges::data(data), size);
 		} else {
@@ -425,19 +389,36 @@ public:
 			mDevice->SetDebugName(**hostBuffer.mBuffer, "Transient host buffer");
 		}
 
-		if (!buffer) {
-			buffer = Buffer::Create(
-				*mDevice,
-				size,
-				usage,
-				vk::MemoryPropertyFlagBits::eDeviceLocal,
-				VMA_ALLOCATION_CREATE_STRATEGY_MIN_TIME_BIT);
-			mDevice->SetDebugName(**buffer.mBuffer, "Transient buffer");
+		// copy to device if usage is specified
+		if (usage != (vk::BufferUsageFlags)0) {
+			if (!buffer) {
+				buffer = Buffer::Create(
+					*mDevice,
+					size,
+					usage,
+					vk::MemoryPropertyFlagBits::eDeviceLocal,
+					VMA_ALLOCATION_CREATE_STRATEGY_MIN_TIME_BIT);
+				mDevice->SetDebugName(**buffer.mBuffer, "Transient buffer");
+			}
+
+			Copy(hostBuffer.slice(0, size), buffer);
 		}
 
-		Copy(hostBuffer.slice(0, size), buffer);
+		mCache.mNewBuffers[usage].emplace_back(hostBuffer, buffer);
 
-		return mCache.mNewBuffers[usage].emplace_back(hostBuffer, buffer).buffer;
+		return usage == (vk::BufferUsageFlags)0 ? hostBuffer.slice(0, size) : buffer.slice(0, size);
+	}
+
+	ref<Image> GetTransientImage(const ImageInfo& info);
+	inline ref<Image> GetTransientImage(const uint3 extent, const vk::Format format, const vk::ImageUsageFlags usage, const uint32_t mipLevels = 1, const uint32_t arrayLayers = 1) {
+		return GetTransientImage(ImageInfo {
+			.format = format,
+			.extent = extent,
+			.mipLevels = mipLevels,
+			.arrayLayers = arrayLayers,
+			.usage = usage,
+			.queueFamilies = { QueueFamily() }
+		});
 	}
 
 	inline void Blit(const ref<Image>& src, const ref<Image>& dst, const vk::ArrayProxy<const vk::ImageBlit>& regions, const vk::Filter filter) {

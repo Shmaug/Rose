@@ -53,10 +53,15 @@ private:
 
 	PipelineCache accumulation = PipelineCache(FindShaderPath("Accumulation.cs.slang"));
 	bool enableAccumulation = true;
+	bool resetAccumulation = false;
 	uint32_t maxAccumulation = 0;
 	ImageView prevRenderTarget;
 	Transform prevCameraToWorld;
 	std::chrono::high_resolution_clock::time_point prevSceneVersion;
+
+	ImageView referenceImage;
+	bool captureReference = false;
+	bool showReference = false;
 
 	Tonemapper tonemapper;
 
@@ -152,16 +157,18 @@ public:
 	inline void SetScene(const ref<Scene>& s) { scene = s; }
 
 	inline void DrawGui(CommandContext& context) {
-		Gui::ScalarField("Max bounces", vk::Format::eR32Uint, &maxBounces);
-		Gui::ScalarField("Max diffuse bounces", vk::Format::eR32Uint, &maxDiffuseBounces);
-		ImGui::Checkbox("NEE", &enableNEE);
+		bool dirty = false;
+
+		dirty |= Gui::ScalarField("Max bounces", vk::Format::eR32Uint, &maxBounces);
+		dirty |= Gui::ScalarField("Max diffuse bounces", vk::Format::eR32Uint, &maxDiffuseBounces);
+		dirty |= ImGui::Checkbox("NEE", &enableNEE);
 
 		ImGui::Separator();
 
-		ImGui::Checkbox("Fix seed", &useFixedSeed);
+		dirty |= ImGui::Checkbox("Fix seed", &useFixedSeed);
 		if (useFixedSeed) {
 			ImGui::SameLine();
-			Gui::ScalarField("", vk::Format::eR32Uint, &fixedSeed);
+			dirty |= Gui::ScalarField("", vk::Format::eR32Uint, &fixedSeed);
 		}
 
 		ImGui::Separator();
@@ -173,7 +180,19 @@ public:
 
 		ImGui::Separator();
 
+		if (ImGui::Button("Capture reference")) {
+			captureReference = true;
+		}
+		if (referenceImage) {
+			ImGui::SameLine();
+			ImGui::Checkbox("Show", &showReference);
+		}
+
+		ImGui::Separator();
+
 		tonemapper.DrawGui(context);
+
+		if (dirty) resetAccumulation = true;
 	}
 
 	inline const ImageView& GetAttachment(const uint32_t index) const {
@@ -275,6 +294,7 @@ public:
 		const ImageView& renderTarget = attachments[0];
 		const ImageView& visibility   = attachments[1];
 
+		// main path tracing
 		{
 			ShaderParameter params = {};
 			params["scene"] = scene->renderData.sceneParameters;
@@ -291,7 +311,7 @@ public:
 			pathTracer(context, renderTarget.Extent(), params, ShaderDefines{ { "USE_NEE", enableNEE ? "1" : "0" } });
 		}
 
-		if (enableAccumulation && prevCameraToWorld.transform == viewData.cameraToWorld.transform && prevSceneVersion >= scene->renderData.updateTime)
+		if (enableAccumulation && !resetAccumulation && prevCameraToWorld.transform == viewData.cameraToWorld.transform && prevSceneVersion >= scene->renderData.updateTime)
 		{
 			ShaderParameter params = {};
 			params["renderTarget"]     = ImageParameter{ .image = renderTarget,     .imageLayout = vk::ImageLayout::eGeneral };
@@ -299,9 +319,29 @@ public:
 			params["maxAccumulation"] = maxAccumulation;
 			accumulation(context, renderTarget.Extent(), params);
 		}
+		resetAccumulation = false;
 		context.Copy(renderTarget, prevRenderTarget);
 		prevCameraToWorld = viewData.cameraToWorld;
 		prevSceneVersion = scene->renderData.updateTime;
+
+		// reference image / error measurement
+
+		if (captureReference) {
+			if (!referenceImage || referenceImage.Extent() != renderTarget.Extent()) {
+				referenceImage = ImageView::Create(
+					Image::Create(context.GetDevice(), ImageInfo{
+						.format = renderTarget.GetImage()->Info().format,
+						.extent = renderTarget.Extent(),
+						.usage = vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eSampled,
+						.queueFamilies = { context.QueueFamily() } }));
+			}
+			context.Copy(renderTarget, referenceImage);
+			captureReference = false;
+		}
+		if (referenceImage && showReference)
+			context.Copy(referenceImage, renderTarget);
+
+		// tonemap
 
 		tonemapper.Render(context, renderTarget);
 	}

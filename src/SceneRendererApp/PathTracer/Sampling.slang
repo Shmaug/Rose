@@ -1,6 +1,6 @@
 import Rose.Core.MathUtils;
 
-using namespace RoseEngine;
+namespace RoseEngine {
 
 float2 SampleUniformTriangle(const float2 uv) {
     const float a = sqrt(uv.x);
@@ -45,94 +45,114 @@ float CosHemispherePdfW(const float cosTheta) {
 	return max(cosTheta, 0.f) / M_PI;
 }
 
-float2 SampleTexel(Texture2D<float4> image, float2 rnd, out float pdf, const uint maxIterations = 10) {
+float2 SampleTexel(Texture2D<float> image, float2 rnd, out float pdf, const uint maxIterations = 16)
+{
     uint2 imageExtent;
     uint levelCount;
     image.GetDimensions(0, imageExtent.x, imageExtent.y, levelCount);
 
     pdf = 1;
     int2 coord = 0;
-    uint2 lastExtent = 1;
-    for (uint i = 1; i < min(maxIterations + 1, levelCount - 1); i++) {
-        const uint level = levelCount - 1 - i;
-        uint tmp;
-        uint2 extent;
-        image.GetDimensions(level, extent.x, extent.y, tmp);
-        const float inv_h = 1 / (float)extent.y;
+    uint2 extent;
+    for (uint i = 1; i < min(maxIterations + 1, levelCount - 1); i++)
+    {
+		coord *= 2;
 
-        coord *= int2(extent / lastExtent);
+        const uint level = levelCount - 1 - i;
+        extent = max(1u, imageExtent / (1 << level));
+
+        const bool2 b = (coord + 1) < extent;
 
         float4 p = 0;
-        if (extent.x - coord.x > 1) {
-            const float sy = sin(M_PI * (coord.y + 0.5f) * inv_h);
-            p[0] = luminance(image.Load(int3(coord + int2(0, 0), (int)level)).rgb) * sy;
-            p[1] = luminance(image.Load(int3(coord + int2(1, 0), (int)level)).rgb) * sy;
-        }
-        if (extent.y - coord.y > 1) {
-            const float sy = sin(M_PI * (coord.y + 1.5f) * inv_h);
-            p[2] = luminance(image.Load(int3(coord + int2(0, 1), (int)level)).rgb) * sy;
-            p[3] = luminance(image.Load(int3(coord + int2(1, 1), (int)level)).rgb) * sy;
-        }
-        const float sum = dot(p, 1);
-        if (sum < 1e-6) continue;
-        p /= sum;
+		p[0] = image.Load(int3(coord + int2(0, 0), (int)level));
+        if (b.x) p[1] = image.Load(int3(coord + int2(1, 0), (int)level));
+        if (b.y) p[2] = image.Load(int3(coord + int2(0, 1), (int)level));
+		if (all(b)) p[3] = image.Load(int3(coord + int2(1, 1), (int)level));
 
-        for (int j = 0; j < 4; j++) {
-            if (j == 3 || rnd.x < p[j]) {
-                coord += int2(j % 2, j / 2);
-                pdf *= p[j];
-                rnd.x /= p[j];
-                break;
-            }
-            rnd.x -= p[j];
+        const float ps = dot(p, 1);
+        p = ps > 0 ? p / ps : 0;
+
+        const float px = p[1] + p[3];
+        if (rnd.x < px)
+        {
+            coord.x++;
+            rnd.x /= px;
+            pdf *= px;
+		}
+        else
+        {
+            rnd.x = (rnd.x - px) / (1 - px);
+            pdf *= 1 - px;
         }
 
-        lastExtent = extent;
+        const float py = p[2] + p[3];
+        if (rnd.y < py)
+        {
+            coord.y++;
+            rnd.y /= py;
+			pdf *= py;
+        }
+        else
+        {
+            rnd.y = (rnd.y - py) / (1 - py);
+			pdf *= 1 - py;
+        }
     }
 
-    pdf *= lastExtent.x * lastExtent.y;
+    pdf *= extent.x * extent.y;
 
-    return (float2(coord) + rnd) / float2(lastExtent);
+    return (float2(coord) + rnd) / float2(extent);
 }
-float SampleTexelPdf(Texture2D<float4> image, const float2 uv, const uint maxIterations = 10) {
+float SampleTexelPdf(Texture2D<float> image, const float2 uv, const uint maxIterations = 16)
+{
     uint2 imageExtent;
     uint levelCount;
     image.GetDimensions(0, imageExtent.x, imageExtent.y, levelCount);
 
     float pdf = 1;
-    uint2 lastExtent = 1;
-    for (uint i = 1; i < min(maxIterations + 1, levelCount - 1); i++) {
+    uint2 extent;
+    for (uint i = 1; i < min(maxIterations + 1, levelCount - 1); i++)
+    {
         const uint level = levelCount - 1 - i;
-        uint tmp;
-        uint2 size;
-        image.GetDimensions(level, size.x, size.y, tmp);
-        const float inv_h = 1 / (float)size.y;
+        extent = max(1u, imageExtent / (1 << level));
 
-        const int2 uvi = int2(float2(size) * uv);
+        const int2 uvi = int2(float2(extent) * uv);
         const int2 coord = (uvi / 2) * 2;
-        const uint2 o = min(uvi - coord, 1);
+
+        const bool2 b = (coord + 1) < extent;
 
         float4 p = 0;
-        if (size.x - coord.x > 1) {
-            const float sy = sin(M_PI * (coord.y + 0.5f) * inv_h);
-            p[0] = luminance(image.Load(int3(coord + int2(0, 0), (int)level)).rgb) * sy;
-            p[1] = luminance(image.Load(int3(coord + int2(1, 0), (int)level)).rgb) * sy;
-        }
-        if (size.y - coord.y > 1) {
-            const float sy = sin(M_PI * (coord.y + 1.5f) * inv_h);
-            p[2] = luminance(image.Load(int3(coord + int2(0, 1), (int)level)).rgb) * sy;
-            p[3] = luminance(image.Load(int3(coord + int2(1, 1), (int)level)).rgb) * sy;
-        }
-        const float sum = dot(p, 1);
-        if (sum < 1e-6) continue;
-        p /= sum;
+        p[0] = image.Load(int3(coord + int2(0, 0), (int)level));
+        if (b.x) p[1] = image.Load(int3(coord + int2(1, 0), (int)level));
+        if (b.y) p[2] = image.Load(int3(coord + int2(0, 1), (int)level));
+        if (all(b)) p[3] = image.Load(int3(coord + int2(1, 1), (int)level));
 
-        pdf *= p[o.y * 2 + o.x];
+        const float ps = dot(p, 1);
+        p = ps > 0 ? p / ps : 0;
 
-        lastExtent = size;
+        const float px = p[1] + p[3];
+        if (uvi.x > coord.x)
+        {
+            pdf *= px;
+        }
+        else
+        {
+            pdf *= 1 - px;
+        }
+
+        const float py = p[2] + p[3];
+        if (uvi.y > coord.y)
+        {
+            pdf *= py;
+        }
+        else
+        {
+            pdf *= 1 - py;
+        }
     }
 
-    pdf *= lastExtent.x * lastExtent.y;
+    pdf *= extent.x * extent.y;
 
     return pdf;
+}
 }

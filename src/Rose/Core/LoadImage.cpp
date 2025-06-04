@@ -68,7 +68,7 @@ PixelData LoadImageFile(CommandContext& context, const std::filesystem::path& fi
 			FreeEXRErrorMessage(err);
 			throw std::runtime_error(std::string("Failure when loading image: ") + filename.string());
 		}
-		auto buf = context.UploadData(std::span{ pixels, size_t(width)*size_t(height)*4 });
+		auto buf = context.UploadData(std::span{ pixels, size_t(width)*size_t(height)*4 }, vk::BufferUsageFlagBits::eTransferSrc);
 		std::free(pixels);
 		return PixelData{buf, vk::Format::eR32G32B32A32Sfloat, uint3(width, height, 1)};
 	} else if (filename.extension() == ".dds") {
@@ -82,7 +82,7 @@ PixelData LoadImageFile(CommandContext& context, const std::filesystem::path& fi
 
 		const DDSFile::ImageData* img = dds.GetImageData(0, 0);
 
-		auto buf = context.UploadData(std::span{ (std::byte*)img->m_mem, img->m_memSlicePitch });
+		auto buf = context.UploadData(std::span{ (std::byte*)img->m_mem, img->m_memSlicePitch }, vk::BufferUsageFlagBits::eTransferSrc);
 		return PixelData{buf, dxgiToVulkan(dds.GetFormat(), desiredChannels == 4), uint3(dds.GetWidth(), dds.GetHeight(), dds.GetDepth())};
 	} else {
 		int x,y,channels;
@@ -121,7 +121,7 @@ PixelData LoadImageFile(CommandContext& context, const std::filesystem::path& fi
 		std::cout << "Loaded " << filename << " (" << x << "x" << y << ")" << std::endl;
 		if (desiredChannels) channels = desiredChannels;
 
-		auto buf = context.UploadData(std::span{ pixels, size_t(x)*size_t(y)*GetTexelSize(format) });
+		auto buf = context.UploadData(std::span{ pixels, size_t(x)*size_t(y)*GetTexelSize(format) }, vk::BufferUsageFlagBits::eTransferSrc);
 		stbi_image_free(pixels);
 		return PixelData{buf, format, uint3(x,y,1)};
 	}

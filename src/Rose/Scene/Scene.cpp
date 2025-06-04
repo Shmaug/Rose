@@ -16,19 +16,11 @@ void Scene::Load(CommandContext& context, const std::filesystem::path& p) {
 	} else {
 		const PixelData d = LoadImageFile(context, p);
 		if (!d.data) return;
-		const uint32_t maxMips = GetMaxMipLevels(d.extent);
 		const ImageView img = ImageView::Create(
 			Image::Create(context.GetDevice(), ImageInfo{
 				.format = d.format,
 				.extent = d.extent,
-				.mipLevels = maxMips,
-				.queueFamilies = { context.QueueFamily() } }),
-			vk::ImageSubresourceRange{
-				.aspectMask = vk::ImageAspectFlagBits::eColor,
-				.baseMipLevel = 0,
-				.levelCount = maxMips,
-				.baseArrayLayer = 0,
-				.layerCount = 1 });
+				.queueFamilies = { context.QueueFamily() } }));
 		if (!img) return;
 		context.Copy(d.data, img);
 		context.GenerateMipMaps(img.mImage);
@@ -141,18 +133,51 @@ void Scene::PrepareRenderData(CommandContext& context, const Scene::RenderableSe
 
 	renderData.sceneParameters["backgroundColor"] = backgroundColor;
 	uint32_t backgroundImageIndex = -1;
-	if (backgroundImage) {
-		backgroundImageIndex = (uint32_t)imageMap.size();
-		imageMap.emplace(backgroundImage, backgroundImageIndex);
+	if (backgroundImage && any(glm::greaterThan(backgroundColor, float3(0.f)))) {
+		auto it = imageMap.find(backgroundImage);
+		if (it == imageMap.end()) {
+			backgroundImageIndex = (uint32_t)imageMap.size();
+			imageMap.emplace(backgroundImage, backgroundImageIndex);
+		} else {
+			backgroundImageIndex = it->second;
+		}
+
+		if (!backgroundImportanceMap || backgroundImportanceMap.Extent() != backgroundImage.Extent()) {
+			backgroundImportanceMap = ImageView::Create(
+				Image::Create(context.GetDevice(), ImageInfo{
+					.format = vk::Format::eR16Sfloat,
+					.extent = backgroundImage.Extent(),
+					.mipLevels = GetMaxMipLevels(backgroundImage.Extent()),
+					.usage = vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eStorage,
+					.queueFamilies = { context.QueueFamily() } }));
+		}
+
+		ShaderParameter params = {};
+		params["image"]         = ImageParameter{ .image = backgroundImage,         .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal };
+		params["importanceMap"] = ImageParameter{ .image = backgroundImportanceMap, .imageLayout = vk::ImageLayout::eGeneral };
+		params["dim"] = (uint2)backgroundImage.Extent();
+		createImportanceMap(context, backgroundImage.Extent(), params);
+		context.GenerateMipMaps(backgroundImportanceMap.GetImage());
+	} else {
+		backgroundImportanceMap = {};
 	}
 	renderData.sceneParameters["backgroundImage"] = backgroundImageIndex;
 
-	renderData.sceneParameters["instanceCount"]   = (uint32_t)instanceHeaders.size();
-	renderData.sceneParameters["meshBufferCount"] = (uint32_t)meshBufferMap.size();
-	renderData.sceneParameters["materialCount"]   = (uint32_t)materials.size();
-	renderData.sceneParameters["imageCount"]      = (uint32_t)imageMap.size();
-	renderData.sceneParameters["emissiveInstanceCount"] = (uint32_t)emissiveInstances.size();
+	renderData.sceneParameters["instanceCount"]               = (uint32_t)instanceHeaders.size();
+	renderData.sceneParameters["meshBufferCount"]             = (uint32_t)meshBufferMap.size();
+	renderData.sceneParameters["materialCount"]               = (uint32_t)materials.size();
+	renderData.sceneParameters["imageCount"]                  = (uint32_t)imageMap.size();
+	renderData.sceneParameters["emissiveInstanceCount"]       = (uint32_t)emissiveInstances.size();
 	renderData.sceneParameters["backgroundSampleProbability"] = backgroundSampleProbability;
+
+	// avoid creating empty buffers
+	if (materials.empty())         materials.push_back({});
+	if (emissiveInstances.empty()) emissiveInstances.push_back({});
+	if (instanceHeaders.empty())   instanceHeaders.push_back({});
+	if (transforms.empty())        transforms.push_back({});
+	if (materials.empty())         materials.push_back({});
+	if (meshes.empty())            meshes.push_back({});
+	if (emissiveInstances.empty()) emissiveInstances.push_back({});
 
 	std::vector<Transform> invTransforms(transforms.size());
 	std::ranges::transform(transforms, invTransforms.begin(), [](const Transform& t) { return inverse(t); });
@@ -163,6 +188,7 @@ void Scene::PrepareRenderData(CommandContext& context, const Scene::RenderableSe
 	renderData.sceneParameters["materials"]         = (BufferView)context.UploadData(materials,         vk::BufferUsageFlagBits::eStorageBuffer);
 	renderData.sceneParameters["meshes"]            = (BufferView)context.UploadData(meshes,            vk::BufferUsageFlagBits::eStorageBuffer);
 	renderData.sceneParameters["emissiveInstances"] = (BufferView)context.UploadData(emissiveInstances, vk::BufferUsageFlagBits::eStorageBuffer);
+	renderData.sceneParameters["backgroundImportanceMap"] = ImageParameter{ .image = backgroundImportanceMap, .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal };
 	if (useAccelerationStructure) renderData.sceneParameters["accelerationStructure"] = renderData.accelerationStructure;
 	for (const auto& [buf, idx] : meshBufferMap) renderData.sceneParameters["meshBuffers"][idx] = BufferView{buf, 0, buf->Size()};
 	for (const auto& [img, idx] : imageMap)      renderData.sceneParameters["images"][idx] = ImageParameter{ .image = img, .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal };

@@ -16,7 +16,7 @@ extension RoseEngine::Scene {
 
 				float3 dir;
 				if (backgroundImage < imageCount) {
-					const float2 uv = SampleTexel(images[backgroundImage], rnd.xy, pdf);
+                    const float2 uv = SampleTexel(backgroundImportanceMap, rnd.xy, pdf);
                     dir = sphuv2xyz(uv);
                     // jacobian from sphuv2xyz
 					pdf /= (2 * M_PI * M_PI * sqrt(1 - dir.y*dir.y));
@@ -26,10 +26,9 @@ extension RoseEngine::Scene {
 				}
 
                 if (emissiveInstanceCount > 0)
-					pdf *= backgroundSampleProbability;
-				v.position = dir;
-				v.faceArea = -1;
-				return v;
+                    pdf *= backgroundSampleProbability;
+                v = LoadBackgroundVertex(dir);
+                return v;
 			}
 
             // remap rnd.w from [mBackgroundSampleProbability,1] to [0,1]
@@ -42,7 +41,7 @@ extension RoseEngine::Scene {
 			return v;
 		}
 
-        // uniformly select an instance containing an emissive material
+        // uniformly select an emissive instance
         const uint instanceIndex = emissiveInstances[min(uint(rnd.z * emissiveInstanceCount), emissiveInstanceCount-1)];
 		if (instanceIndex >= instanceCount) {
 			pdf = 0;
@@ -58,32 +57,36 @@ extension RoseEngine::Scene {
 		const uint primitiveIndex = min(uint(rnd.w * instance.triangleCount), instance.triangleCount - 1);
 		pdf *= 1 / (float)instance.triangleCount;
 
-        v = LoadSceneVertex(this, instanceIndex, instance, meshes[instance.meshIndex], primitiveIndex, SampleUniformTriangle(rnd.xy));
+        const PackedSceneHit hit = PackedSceneHit(instanceIndex, primitiveIndex, SampleUniformTriangle(rnd.xy));
+        v = LoadSceneVertex<false>(hit, instance, meshes[instance.meshIndex]);
 		pdf *= 1 / v.faceArea;
 		return v;
 	}
 
-	float EmissionPdf(const SceneVertex v) {
-		if (v.isBackground) {
-			if (any(backgroundColor > 0)) {
-				float pdf = emissiveInstanceCount > 0 ? backgroundSampleProbability : 1;
-				if (backgroundImage < imageCount) {
-					pdf *= SampleTexelPdf(images[backgroundImage], xyz2sphuv(v.position));
-					// jacobian from SphericalUVToCartesian
-					pdf /= (2 * M_PI * M_PI * sqrt(1 - v.position.y*v.position.y));
-				} else {
-					pdf *= 1 / (4 * M_PI);
-				}
+    float EvalBackgroundSamplePdf(const float3 dir) {
+		if (any(backgroundColor > 0)) {
+			float pdf = emissiveInstanceCount > 0 ? backgroundSampleProbability : 1;
+			if (backgroundImage < imageCount) {
+				pdf *= SampleTexelPdf(backgroundImportanceMap, xyz2sphuv(dir));
+				// jacobian from SphericalUVToCartesian
+				pdf /= (2 * M_PI * M_PI * sqrt(1 - dir.y*dir.y));
 			} else {
-				return 0;
-			}
+				pdf *= 1 / (4 * M_PI);
+            }
+            return pdf;
+		} else {
+			return 0;
 		}
+	}
 
+	float EvalSurfaceSamplePdf(const SceneVertex v) {
         if (emissiveInstanceCount == 0) {
 			return 0;
 		}
 
-        float pdf = any(backgroundColor > 0) ? 1 - backgroundSampleProbability : 1;
+        float pdf = 1;
+        if (any(backgroundColor > 0))
+			pdf *= 1 - backgroundSampleProbability;
         pdf *= 1 / (float)emissiveInstanceCount;
 
 		const InstanceHeader instance = instances[v.instanceIndex];

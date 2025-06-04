@@ -2,6 +2,7 @@
 
 #include <imgui/imgui.h>
 
+#include "CommandContext.hpp"
 #include "Pipeline.hpp"
 #include "Hash.hpp"
 

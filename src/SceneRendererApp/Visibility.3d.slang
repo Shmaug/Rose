@@ -33,30 +33,32 @@ v2f vertexMain(
 #if HAS_TEXCOORD
     float2 uv: TEXCOORD0,
 #endif
-    uint instanceId: SV_InstanceID) {
+    uint instanceId: SV_InstanceID
+) {
     v2f o = {};
     o.pos = (projection * (worldToCamera * scene.transforms[scene.instances[instanceId].transformIndex])).ProjectPointUnnormalized(pos);
 	o.instanceId = instanceId;
 #if HAS_TEXCOORD
     o.uv = uv;
 #endif
-
     return o;
 }
 
 [shader("fragment")]
 GBuffer fragmentMain(v2f i, uint primId: SV_PrimitiveID, float3 bary: SV_Barycentrics) {
+	const Material m = scene.materials[scene.instances[i.instanceId].materialIndex];
 #if HAS_TEXCOORD
 #if USE_ALPHA_CUTOFF
-    const Material m = scene.materials[scene.instances[i.instanceId].materialIndex];
     if (m.baseColorImage < scene.imageCount && m.HasFlag(MaterialFlags::eAlphaCutoff)) {
         if (scene.images[m.baseColorImage].Sample(scene.sampler, i.uv).a < m.GetAlphaCutoff())
             discard;
 	}
 #endif
 #endif
+    const PackedSceneHit hit = PackedSceneHit(i.instanceId, primId, bary.yz);
+
     GBuffer r = {};
-    r.color      = float4(0, 0, 0, 1);
-    r.visibility = uint4(i.instanceId, primId, asuint(bary.yz));
+    r.color      = float4(m.GetEmission(), 1);
+    r.visibility = reinterpret<uint4>(hit);
     return r;
 }

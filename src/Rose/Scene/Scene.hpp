@@ -3,7 +3,7 @@
 #include <stack>
 #include <chrono>
 
-#include <Rose/Core/CommandContext.hpp>
+#include <Rose/Core/PipelineCache.hpp>
 #include "SceneNode.hpp"
 
 namespace RoseEngine {
@@ -29,6 +29,8 @@ struct SceneRenderData {
 
 class Scene {
 private:
+	PipelineCache createImportanceMap = PipelineCache(FindShaderPath("CreateImportanceMap.cs.slang"));
+
 	std::vector<vk::AccelerationStructureInstanceKHR> instances;
 	std::vector<InstanceHeader>                       instanceHeaders;
 	std::vector<Transform>                            transforms;
@@ -60,6 +62,7 @@ public:
 	ref<SceneNode>  sceneRoot = nullptr;
 	SceneRenderData renderData = {};
 	ImageView backgroundImage = {};
+	ImageView backgroundImportanceMap = {};
 	float3    backgroundColor = float3(0);
 	float     backgroundSampleProbability = 0.5f;
 

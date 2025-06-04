@@ -30,7 +30,8 @@ void CommandContext::Begin() {
 				// if we aren't the only owner, release it
 				if (b.buffer.mBuffer     && b.buffer.mBuffer.use_count() > 1) b.buffer = {};
 				if (b.hostBuffer.mBuffer && b.hostBuffer.mBuffer.use_count() > 1) b.hostBuffer = {};
-				mCache.mBuffers[usage].emplace_back(std::move(b));
+				if (b.buffer || b.hostBuffer)
+					mCache.mBuffers[usage].emplace_back(std::move(b));
 			}
 		}
 		mCache.mNewBuffers.clear();
@@ -40,16 +41,20 @@ void CommandContext::Begin() {
 
 	if (!mCache.mNewImages.empty()) {
 		for (auto&[info, images] : mCache.mNewImages) {
-			for (auto& image : images)
-				mCache.mImages[info].emplace_back(std::move(image));
+			for (auto& image : images) {
+				if (image && image.use_count() == 1)
+					mCache.mImages[info].emplace_back(std::move(image));
+			}
 			images.clear();
 		}
 	}
 
 	if (!mCache.mNewDescriptorSets.empty()) {
 		for (auto&[layout, sets] : mCache.mNewDescriptorSets)
-			for (auto& s : sets)
-				mCache.mDescriptorSets[layout].emplace_back(std::move(s));
+			for (auto& s : sets) {
+				if (s && s.use_count() == 1)
+					mCache.mDescriptorSets[layout].emplace_back(std::move(s));
+			}
 		mCache.mNewDescriptorSets.clear();
 	}
 }

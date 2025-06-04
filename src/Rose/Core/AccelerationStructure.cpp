@@ -6,10 +6,16 @@
 namespace RoseEngine {
 
 
-ref<AccelerationStructure> AccelerationStructure::Create(CommandContext& context, const vk::AccelerationStructureTypeKHR type, const vk::ArrayProxy<const vk::AccelerationStructureGeometryKHR>& geometries, const vk::ArrayProxy<const vk::AccelerationStructureBuildRangeInfoKHR>& buildRanges) {
+ref<AccelerationStructure> AccelerationStructure::Create(
+	CommandContext& context,
+	const vk::AccelerationStructureTypeKHR type,
+	const vk::ArrayProxy<const vk::AccelerationStructureGeometryKHR>& geometries,
+	const vk::ArrayProxy<const vk::AccelerationStructureBuildRangeInfoKHR>& buildRanges,
+	const vk::BuildAccelerationStructureFlagBitsKHR buildFlags
+) {
 	vk::AccelerationStructureBuildGeometryInfoKHR buildGeometry {
 		.type  = type,
-		.flags = vk::BuildAccelerationStructureFlagBitsKHR::ePreferFastTrace,
+		.flags = buildFlags,
 		.mode  = vk::BuildAccelerationStructureModeKHR::eBuild };
 	buildGeometry.setGeometries(geometries);
 
@@ -51,8 +57,17 @@ ref<AccelerationStructure> AccelerationStructure::Create(CommandContext& context
 	return ref<AccelerationStructure>(as);
 }
 
-ref<AccelerationStructure> AccelerationStructure::Create(CommandContext& context, vk::ArrayProxy<vk::AccelerationStructureInstanceKHR>&& instances) {
-	auto instanceBuf = context.UploadData(instances, vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR | vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eShaderDeviceAddress);
+ref<AccelerationStructure> AccelerationStructure::Create(
+	CommandContext& context,
+	vk::ArrayProxy<vk::AccelerationStructureInstanceKHR>&& instances,
+	const vk::BuildAccelerationStructureFlagBitsKHR buildFlags
+) {
+	BufferRange<vk::AccelerationStructureInstanceKHR> instanceBuf;
+
+	if (instances.empty())
+		instanceBuf = context.UploadData(std::vector<vk::AccelerationStructureInstanceKHR>(1), vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR | vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eShaderDeviceAddress);
+	else
+		instanceBuf = context.UploadData(instances, vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR | vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eShaderDeviceAddress);
 
 	vk::AccelerationStructureGeometryInstancesDataKHR instanceGeometries{
 		.data = context.GetDevice()->getBufferAddress(vk::BufferDeviceAddressInfo{ .buffer = **instanceBuf.mBuffer }) };
@@ -62,7 +77,7 @@ ref<AccelerationStructure> AccelerationStructure::Create(CommandContext& context
 		.geometry = instanceGeometries };
 
 	vk::AccelerationStructureBuildRangeInfoKHR range{ .primitiveCount = (uint32_t)std::ranges::size(instances) };
-	return Create(context, vk::AccelerationStructureTypeKHR::eTopLevel, geometry, range);
+	return Create(context, vk::AccelerationStructureTypeKHR::eTopLevel, geometry, range, buildFlags);
 }
 
 ref<AccelerationStructure> AccelerationStructure::Create(CommandContext& context, const float3 aabbMin, const float3 aabbMax, const bool opaque) {

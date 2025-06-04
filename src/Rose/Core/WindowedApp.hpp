@@ -43,15 +43,16 @@ struct WindowedApp {
 
 	inline CommandContext& CurrentContext() { return *contexts[swapchain->ImageIndex()]; }
 
-	inline WindowedApp(const std::string& windowTitle, const vk::ArrayProxy<const std::string> &deviceExtensions = { VK_KHR_SWAPCHAIN_EXTENSION_NAME }) {
+	inline WindowedApp(
+		const std::string& windowTitle,
+		const vk::ArrayProxy<const std::string>& deviceExtensions = { VK_KHR_SWAPCHAIN_EXTENSION_NAME },
+		const vk::ArrayProxy<const std::string>& validationLayers = { "VK_LAYER_KHRONOS_validation", /*"VK_LAYER_KHRONOS_synchronization2"*/ }
+	) {
 		std::vector<std::string> instanceExtensions;
 		for (const auto& e : Window::RequiredInstanceExtensions())
 			instanceExtensions.emplace_back(e);
 
-		instance = Instance::Create(instanceExtensions, {
-			"VK_LAYER_KHRONOS_validation",
-			//"VK_LAYER_KHRONOS_synchronization2",
-		});
+		instance = Instance::Create(instanceExtensions, validationLayers);
 
 		vk::raii::PhysicalDevice physicalDevice = nullptr;
 		std::tie(physicalDevice, presentQueueFamily) = Window::FindSupportedDevice(**instance);

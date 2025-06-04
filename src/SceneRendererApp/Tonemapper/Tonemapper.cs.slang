@@ -172,7 +172,7 @@ void Tonemap(uint3 index : SV_DispatchThreadID) {
 		break;
 	}
 
-    if (GAMMA_CORRECT) radiance = rgb2srgb(radiance);
+    if ((bool)GAMMA_CORRECT) radiance = rgb2srgb(radiance);
 
     gImage[index.xy] = float4(radiance, 1);
 }
