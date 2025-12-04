@@ -10,7 +10,32 @@
 #include <imnodes.h>
 #include <implot.h>
 
+#include <filesystem>
+#if defined(_WIN32)
+#include <windows.h>
+#elif defined(__linux__)
+#include <unistd.h>
+#include <limits.h>
+#endif
+
 namespace RoseEngine {
+
+std::string getExecutableDir() {
+	#if defined(_WIN32)
+		// Windows Implementation
+		char buffer[MAX_PATH];
+		// GetModuleFileName IS null-terminated, so it works naturally
+		GetModuleFileNameA(NULL, buffer, MAX_PATH);
+		return std::filesystem::path(buffer).parent_path().string();
+	#elif defined(__linux__)
+		// Linux Implementation
+		char buffer[PATH_MAX];
+		ssize_t count = readlink("/proc/self/exe", buffer, PATH_MAX);
+		assert(count != -1);
+		// Explicitly create string with length 'count'
+		return std::filesystem::path(std::string(buffer, count)).parent_path().string();
+	#endif
+}
 
 weak_ref<Device> Gui::mDevice = {};
 vk::raii::RenderPass Gui::mRenderPass = nullptr;
@@ -250,9 +275,13 @@ void Gui::Initialize(CommandContext& context, const Window& window, const Swapch
 	ImGui_ImplVulkan_Init(&init_info, *mRenderPass);
 
 	// Upload Fonts
+	//
+	std::filesystem::path source_path = getExecutableDir();
+	std::filesystem::path font_path = source_path / "DroidSans.ttf";
+	std::cout << "Font path" << font_path << std::endl;
 
-	ImGui::GetIO().Fonts->AddFontFromFileTTF("DroidSans.ttf", 16.f);
-	mHeaderFont = ImGui::GetIO().Fonts->AddFontFromFileTTF("DroidSans.ttf", 20.f);
+	ImGui::GetIO().Fonts->AddFontFromFileTTF(font_path.string().c_str(), 16.f);
+	mHeaderFont = ImGui::GetIO().Fonts->AddFontFromFileTTF(font_path.string().c_str(), 20.f);
 
 	context.Begin();
 	ImGui_ImplVulkan_CreateFontsTexture(**context);

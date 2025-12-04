@@ -42,6 +42,28 @@ struct Transform {
 		t.transform = glm::tweakedInfinitePerspective(fovY, aspect, nearZ);
 		return t;
 	}
+	inline static Transform PerspectiveFovXY(const float fovX, const float fovY, const float nearZ) {
+		Transform t = {};
+		t.transform = glm::mat4(0.0f); // Initialize to all zeros
+
+		// The projection matrix elements are based on the cotangent of half the FOV.
+		// cot(a) = 1.0f / tan(a)
+		const float f = 1.0f / tanf(fovY / 2.0f);
+		const float g = 1.0f / tanf(fovX / 2.0f);
+
+		// Manually construct the infinite projection matrix
+		t.transform[0][0] = g;
+		t.transform[1][1] = f;
+		t.transform[2][2] = -1.0f; // Use -1 for a right-handed coordinate system
+		t.transform[3][2] = -nearZ; // For tweaked/reversed Z, this might be nearZ
+		t.transform[2][3] = -1.0f;
+
+		// Based on your original code, you may also need to flip the Y-axis for
+		// graphics APIs like Vulkan. If so, just uncomment the following line.
+		// t.transform[1] = -t.transform[1];
+
+		return t;
+	}
 	inline operator const float4x4&() const { return transform; }
 	#endif
 

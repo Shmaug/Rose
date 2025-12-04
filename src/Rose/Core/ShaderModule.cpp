@@ -92,7 +92,6 @@ inline const char* to_string(slang::ParameterCategory category) {
 	};
 };
 
-
 struct ParameterAccessPath {
 	static const size_t kInvalidAccessPath = ~size_t(0);
 

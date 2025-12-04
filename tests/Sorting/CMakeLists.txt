@@ -1,0 +1,1 @@
+AddTest(DeviceSort Sort.cpp)
