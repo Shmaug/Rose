@@ -95,6 +95,7 @@ public:
 		bool changed = false;
 
 		changed |= ImGui::ColorEdit3("Background color", &scene->backgroundColor.x, ImGuiColorEditFlags_Float|ImGuiColorEditFlags_HDR);
+		changed |= ImGui::SliderFloat("Background sample probability", &scene->backgroundSampleProbability, 0.f, 1.f);
 
 		auto n = selected.lock();
 		if (!n) return;
@@ -265,11 +266,11 @@ public:
 						.srcSubresource = renderTarget.GetSubresourceLayer(),
 						.srcOffsets = std::array<vk::Offset3D, 2>{
 							vk::Offset3D{ srcMin.x, srcMin.y, 0 },
-							vk::Offset3D{ srcMax.x, srcMax.y, 0 } },
+							vk::Offset3D{ srcMax.x, srcMax.y, 1 } },
 						.dstSubresource = renderTarget.GetSubresourceLayer(),
 						.dstOffsets = std::array<vk::Offset3D, 2>{
 							vk::Offset3D{ dstMin.x, dstMin.y, 0 },
-							vk::Offset3D{ dstMax.x, dstMax.y, 0 } }
+							vk::Offset3D{ dstMax.x, dstMax.y, 1 } }
 					} },
 					vk::Filter::eNearest);
 			}

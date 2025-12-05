@@ -116,7 +116,7 @@ bool SampleDirectLight(inout RandomSampler rng, const SceneVertex vertex, const 
         ray.TMax = length(ray.Direction);
         ray.Direction /= ray.TMax;
     }
-    if (!any(L > 0)) {
+    if (!any(L > 0) || !(pdf > 0)) {
         L = 0;
         return false;
     }
@@ -130,8 +130,9 @@ bool SampleDirectLight(inout RandomSampler rng, const SceneVertex vertex, const 
     if (!kDIOnly)
     	L *= evalMIS(pdf, f.fwdPdf * G);
 
-    if (!any(L > 0))
+    if (!any(L > 0)) {
         return false;
+    }
 
     return !scene.Occluded(ray);
 }
